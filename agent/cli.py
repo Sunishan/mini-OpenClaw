@@ -1,8 +1,9 @@
 """命令行入口。
 
 用法：
-  python -m agent.cli --selfcheck          # Day1：自检骨架是否装好
-  python -m agent.cli "创建 hello.py 并运行"  # Day5 起：真正跑任务（v1 在 Day6）
+  python -m agent.cli --selfcheck                     # Day1：自检骨架是否装好
+  python -m agent.cli "创建 hello.py 并运行"             # Day5 起：真正跑任务（v1 在 Day6）
+  python -m agent.cli --assess "https://example.com"   # 网页可信度评估
 """
 from __future__ import annotations
 import argparse
@@ -43,14 +44,32 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mini-openclaw")
     p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
     p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
+    p.add_argument("--assess", type=str, metavar="URL", help="对指定 URL 进行网页可信度评估")
     args = p.parse_args(argv)
 
-    if args.selfcheck or not args.task:
+    if args.selfcheck or not (args.task or args.assess):
         return selfcheck()
 
-    # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     from agent.loop import AgentLoop
     reg = build_default_registry()
+
+    if args.assess:
+        # ── 加载可信度评估工具 ────────────────
+        from tools.credibility import build_credibility_registry
+        cred_reg = build_credibility_registry()
+        for name in cred_reg.names():
+            tool = cred_reg.get(name)
+            if tool:
+                reg.register(tool)
+        # 使用可信度评估专用系统提示词
+        from agent.prompts import CREDIBILITY_SYSTEM_PROMPT
+        system_prompt = CREDIBILITY_SYSTEM_PROMPT
+        user_task = f"请对网页进行完整的可信度评估：{args.assess}"
+    else:
+        system_prompt = SYSTEM_PROMPT
+        user_task = args.task
+
+    # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     try:
         from backend.client import DeepSeekBackend
         backend = DeepSeekBackend()                       # 需要 DEEPSEEK_API_KEY
@@ -58,8 +77,8 @@ def main(argv: list[str] | None = None) -> int:
         from backend.fake_backend import FakeBackend
         print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。配置 DEEPSEEK_API_KEY 后即用真模型。")
         backend = FakeBackend()
-    agent = AgentLoop(backend, reg, SYSTEM_PROMPT)
-    print(agent.run(args.task))
+    agent = AgentLoop(backend, reg, system_prompt)
+    print(agent.run(user_task))
     return 0
 
 
