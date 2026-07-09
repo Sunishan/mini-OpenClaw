@@ -46,11 +46,16 @@ class DeepSeekBackend:
             payload["tool_choice"] = "auto"
 
         resp = self._client.post(
-            f"{self.base_url}/v1/chat/completions",
+            f"{self.base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
             json=payload,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"DeepSeek API 请求失败：{resp.status_code} {resp.reason_phrase}\n{resp.text}"
+            ) from e
         msg = resp.json()["choices"][0]["message"]
         return self._normalize(msg)
 

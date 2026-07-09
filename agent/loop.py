@@ -14,6 +14,7 @@ Day5 你要把下面的 run() 真正实现出来（Day6 随工具集扩展完善
 from __future__ import annotations
 from typing import Any
 
+from agent.context import maybe_compact, truncate_observation
 from tools.base import ToolRegistry
 
 
@@ -41,16 +42,20 @@ class AgentLoop:
                 return assistant.get("content", "")
 
             # TODO[Day5] 分发并执行工具，把每个结果作为 role="tool" 注入 messages：
-            for call in tool_calls:
+            for i, call in enumerate(tool_calls):
+                call_id = call.get("id") or f"call_{i}"
                 tool = self.registry.get(call["name"])
                 if tool is None:
                     obs = f"错误：未知工具 {call['name']}"
                 else:
-                    # TODO[Day7] 加错误恢复（try/except，把异常文本作为 observation，让模型自我修复）
-                    obs = tool.run(**call.get("arguments", {}))
+                    try:
+                        obs = tool.run(**call.get("arguments", {}))
+                    except Exception as e:  # noqa
+                        obs = f"工具 {call['name']} 执行出错：{e}"
                 messages.append({"role": "tool", "name": call["name"],
-                                 "tool_call_id": call.get("id"), "content": str(obs)})
+                                 "tool_call_id": call_id,
+                                 "content": truncate_observation(str(obs))})
 
-            # TODO[Day7] 在这里做上下文管理：超出 token 预算时触发 compaction（见 agent/context.py）
+            messages = maybe_compact(messages, self.backend)
 
         return "[达到最大轮数上限，未完成任务]"

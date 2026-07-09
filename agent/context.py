@@ -16,15 +16,35 @@ def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(len(str(m.get("content", ""))) for m in messages) // 4
 
 
-def maybe_compact(messages: list[dict[str, Any]], budget: int = 6000) -> list[dict[str, Any]]:
+def _summarize(backend: Any, chunk: list[dict[str, Any]]) -> str:
+    text = "\n".join(f"{m['role']}: {m.get('content', '')}" for m in chunk)
+    prompt = "把下面的对话历史压缩成要点，保留任务目标、关键发现、已完成步骤：\n" + text
+    resp = backend.chat([{"role": "user", "content": prompt}], tools=[])
+    return resp.get("content", "")
+
+
+def maybe_compact(messages: list[dict[str, Any]], backend: Any,
+                  budget: int = 6000, keep_recent: int = 4) -> list[dict[str, Any]]:
     """超预算则压缩历史，返回新的 messages。"""
     if estimate_tokens(messages) <= budget:
         return messages
-    # TODO[Day7] 实现 compaction：
-    #   1) 保留 system（第0条）
-    #   2) 把中间较早的 user/assistant/tool 摘要成一条 system 备忘（可调后端做摘要）
-    #   3) 保留最近 K 轮原文
-    raise NotImplementedError("Day7：实现 compaction")
+    if not messages:
+        return messages
+
+    system = messages[0]
+    start = max(1, len(messages) - keep_recent) if keep_recent > 0 else len(messages)
+    # OpenAI/DeepSeek 要求 role=tool 必须紧跟对应 assistant.tool_calls。
+    # 如果滑动窗口切在 tool 消息中间，就向前扩到该组 tool_calls 的 assistant。
+    while start > 1 and messages[start].get("role") == "tool":
+        start -= 1
+    recent = messages[start:]
+    middle = messages[1:start]
+    if not middle:
+        return messages
+
+    memo = _summarize(backend, middle)
+    memo_message = {"role": "system", "content": "历史备忘：" + memo}
+    return [system, memo_message] + recent
 
 
 def truncate_observation(text: str, max_chars: int = 4000) -> str:
