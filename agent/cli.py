@@ -53,6 +53,14 @@ def main(argv: list[str] | None = None) -> int:
     from agent.loop import AgentLoop
     reg = build_default_registry()
 
+    from mcp.client import MCPClient, register_mcp_tools
+    try:
+        mcp = MCPClient(["python", "mcp/echo_server.py"])
+        mcp.start()
+        register_mcp_tools(reg, mcp)
+    except Exception as e:  # noqa
+        print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
+
     if args.assess:
         # ── 加载可信度评估工具 ────────────────
         from tools.credibility import build_credibility_registry
