@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 import argparse
+import os
 import sys
 
 from tools.base import build_default_registry
@@ -60,12 +61,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
 
     try:
-        pw_mcp = MCPClient(["npx", "-y", "@playwright/mcp@latest"])
+        pw_mcp = MCPClient([
+            "npx", "-y", "@playwright/mcp@latest",
+            "--headless",
+            "--isolated",
+            "--ignore-https-errors",
+        ])
         pw_mcp.start()
         register_mcp_tools(reg, pw_mcp)
         print("[ok] Playwright MCP 已接入。")
     except Exception as e:  # noqa
         print(f"[提示] Playwright MCP 未接入（{e}），继续使用其它工具。")
+
+    firecrawl_key = os.environ.get("FIRECRAWL_API_KEY")
+    if firecrawl_key:
+        try:
+            firecrawl_mcp = MCPClient(
+                ["npx", "-y", "firecrawl-mcp"],
+                env={"FIRECRAWL_API_KEY": firecrawl_key},
+            )
+            firecrawl_mcp.start()
+            register_mcp_tools(reg, firecrawl_mcp)
+            print("[ok] Firecrawl MCP 已接入。")
+        except Exception as e:  # noqa
+            print(f"[提示] Firecrawl MCP 未接入（{e}），继续使用其它工具。")
+    else:
+        print("[提示] 未设置 FIRECRAWL_API_KEY，跳过 Firecrawl MCP。")
 
     # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     try:
