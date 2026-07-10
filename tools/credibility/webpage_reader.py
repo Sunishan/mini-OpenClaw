@@ -43,12 +43,16 @@ def _get_text_content(soup: "BeautifulSoup", max_chars: int) -> str:
 
     # 移除隐藏元素（style="display:none" 等）
     for tag in main_elem.find_all(True):
-        if tag.get("style") and re.search(r"display\s*:\s*none", tag["style"], re.IGNORECASE):
-            tag.decompose()
-            continue
-        hidden = tag.get("aria-hidden")
-        if hidden and hidden.lower() == "true":
-            tag.decompose()
+        try:
+            if tag.get("style") and re.search(r"display\s*:\s*none", tag["style"], re.IGNORECASE):
+                tag.decompose()
+                continue
+            hidden = tag.get("aria-hidden")
+            if hidden and hidden.lower() == "true":
+                tag.decompose()
+                continue
+        except AttributeError:
+            # BeautifulSoup 某些版本中 attrs 可能为 None，跳过即可
             continue
 
     text = main_elem.get_text(separator="\n", strip=True)
@@ -64,11 +68,11 @@ def _extract_meta(soup: "BeautifulSoup", name: str) -> str:
     """从 <meta> 标签提取属性值，支持 name 和 property 两种写法。"""
     # <meta name="..." content="...">
     tag = soup.find("meta", attrs={"name": name, "content": True})
-    if tag:
+    if tag and tag.get("content"):
         return tag["content"].strip()
     # <meta property="og:..." content="...">
     tag = soup.find("meta", attrs={"property": name, "content": True})
-    if tag:
+    if tag and tag.get("content"):
         return tag["content"].strip()
     return ""
 
@@ -126,44 +130,53 @@ def _webpage_reader(url: str, max_chars: int = 5000) -> str:
 
     # ── 3. 解析 HTML ──────────────────────────────────
     html_text = resp.text
-    soup = BeautifulSoup(html_text, "html.parser")
+    try:
+        soup = BeautifulSoup(html_text, "html.parser")
+    except Exception as e:
+        result.error = f"HTML 解析失败：{e}"
+        return to_json(result)
 
     # 标题
-    title_tag = soup.find("title")
-    result.title = title_tag.get_text(strip=True) if title_tag else ""
+    try:
+        title_tag = soup.find("title")
+        result.title = title_tag.get_text(strip=True) if title_tag else ""
 
-    # 描述
-    result.description = _extract_meta(soup, "description") or _extract_meta(soup, "og:description")
+        # 描述
+        result.description = _extract_meta(soup, "description") or _extract_meta(soup, "og:description")
 
-    # 域名
-    result.domain = _extract_domain(url)
+        # 域名
+        result.domain = _extract_domain(url)
 
-    # 作者
-    result.author = (
-        _extract_meta(soup, "author")
-        or _extract_meta(soup, "article:author")
-        or ""
-    )
+        # 作者
+        result.author = (
+            _extract_meta(soup, "author")
+            or _extract_meta(soup, "article:author")
+            or ""
+        )
 
-    # 发布日期
-    result.publication_date = (
-        _extract_meta(soup, "date")
-        or _extract_meta(soup, "article:published_time")
-        or _extract_meta(soup, "publication_date")
-        or ""
-    )
-    # 如果日期包含 T（ISO 8601），只取日期部分
-    if result.publication_date and "T" in result.publication_date:
-        result.publication_date = result.publication_date.split("T")[0]
+        # 发布日期
+        result.publication_date = (
+            _extract_meta(soup, "date")
+            or _extract_meta(soup, "article:published_time")
+            or _extract_meta(soup, "publication_date")
+            or ""
+        )
+        # 如果日期包含 T（ISO 8601），只取日期部分
+        if result.publication_date and "T" in result.publication_date:
+            result.publication_date = result.publication_date.split("T")[0]
 
-    # 正文内容
-    result.text_content = _get_text_content(soup, max_chars)
+        # 正文内容
+        result.text_content = _get_text_content(soup, max_chars)
 
-    # 字数统计
-    words = result.text_content.split()
-    result.word_count = len(words)
+        # 字数统计
+        words = result.text_content.split()
+        result.word_count = len(words)
 
-    result.extraction_success = True
+        result.extraction_success = True
+    except Exception as e:
+        import traceback
+        result.error = f"页面解析过程出错：{e}\n{traceback.format_exc()[:500]}"
+        result.extraction_success = False
 
     return to_json(result)
 

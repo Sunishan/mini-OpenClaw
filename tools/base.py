@@ -57,20 +57,28 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
-    """组装内置工具。随课程推进逐步取消注释。"""
+    """组装所有内置工具（包括 credibility 工具集）。"""
     reg = ToolRegistry()
     from .fs import read_tool, write_tool
     from .shell import bash_tool
     for t in (read_tool, write_tool, bash_tool):
         reg.register(t)
-    #
+
     from .more_tools import edit_tool, grep_tool, glob_tool
     for t in (edit_tool, grep_tool, glob_tool):
         reg.register(t)
-    #
+
     from .more_tools import web_fetch_tool
     reg.register(web_fetch_tool)
-    #
+
+    # ── 注册搜索工具 ──────────────────────────────────
+    from .search import web_search_tool
+    reg.register(web_search_tool)
+
+    # ── 注册 credibility 工具集 ──────────────────────────
+    from .credibility import register_credibility_tools
+    register_credibility_tools(reg)
+
     # TODO[Day7] 再加入：
     # from .more_tools import task_list_tool
     return reg
