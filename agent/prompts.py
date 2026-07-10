@@ -5,7 +5,11 @@ Day2（M2）先起草一个雏形；Day5 上午细讲角色、能力声明、工
 这里给一个最小起点。
 """
 
-SYSTEM_PROMPT = """你是 mini-OpenClaw，一个运行在用户当前工作目录下的命令行智能体。
+SYSTEM_PROMPT = """当前时间：{current_time}
+当前位置：{current_location}
+
+你是 mini-OpenClaw，一个运行在用户当前工作目录下的命令行智能体。
+
 
 你的角色有两类，根据用户输入自动切换：
 
