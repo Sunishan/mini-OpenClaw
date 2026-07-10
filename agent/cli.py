@@ -91,12 +91,12 @@ def _init_agent():
         from backend.fake_backend import FakeBackend
         print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
         backend = FakeBackend()
-    SYSTEM_PROMPT = SYSTEM_PROMPT.format(
+    system_prompt = SYSTEM_PROMPT.format(
         current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         current_location="浙江省 杭州市",
     )
 
-    return AgentLoop(backend, reg, SYSTEM_PROMPT)
+    return AgentLoop(backend, reg, system_prompt)
 
 
 def main(argv: list[str] | None = None) -> int:
