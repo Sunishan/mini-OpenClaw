@@ -1,8 +1,9 @@
 """命令行入口。
 
 用法：
-  python -m agent.cli --selfcheck                     # Day1：自检骨架是否装好
-  python -m agent.cli "创建 hello.py 并运行"             # Day5 起：真正跑任务（v1 在 Day6）
+  python -m agent.cli --selfcheck                       # 自检骨架
+  python -m agent.cli "创建 hello.py 并运行"              # 单次任务
+  python -m agent.cli -i                                 # 交互模式（多轮对话）
 """
 from __future__ import annotations
 import argparse
@@ -18,7 +19,7 @@ def selfcheck() -> int:
     ok = True
     try:
         reg = build_default_registry()
-        print(f"[ok] 工具注册表加载成功，当前内置工具数：{len(reg)}（Day5 起会变多）")
+        print(f"[ok] 工具注册表加载成功，当前内置工具数：{len(reg)}")
     except Exception as e:  # noqa
         print(f"[FAIL] 工具注册表：{e}"); ok = False
 
@@ -31,24 +32,16 @@ def selfcheck() -> int:
 
     try:
         from agent.loop import AgentLoop  # noqa
-        print("[ok] 主循环模块可导入（Day5 实现 run 逻辑）")
+        print("[ok] 主循环模块可导入")
     except Exception as e:  # noqa
         print(f"[FAIL] 主循环：{e}"); ok = False
 
-    print("== 自检", "通过 ✅" if ok else "未通过 ❌", "==")
-    print("\n下一步：按 dayNN 的 lab-guide 填 # TODO 标记。")
+    print("== 自检", "通过" if ok else "未通过", "==")
     return 0 if ok else 1
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="mini-openclaw")
-    p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
-    p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
-    args = p.parse_args(argv)
-
-    if args.selfcheck or not args.task:
-        return selfcheck()
-
+def _init_agent():
+    """初始化 backend 和 AgentLoop。"""
     from agent.loop import AgentLoop
     reg = build_default_registry()
 
@@ -91,12 +84,57 @@ def main(argv: list[str] | None = None) -> int:
     # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     try:
         from backend.client import DeepSeekBackend
-        backend = DeepSeekBackend()                       # 需要 DEEPSEEK_API_KEY
+        backend = DeepSeekBackend()
     except Exception as e:  # noqa
         from backend.fake_backend import FakeBackend
-        print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。配置 DEEPSEEK_API_KEY 后即用真模型。")
+        print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
         backend = FakeBackend()
-    agent = AgentLoop(backend, reg, SYSTEM_PROMPT)
+
+    return AgentLoop(backend, reg, SYSTEM_PROMPT)
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="mini-openclaw")
+    p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
+    p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
+    p.add_argument("-i", "--interactive", action="store_true",
+                   help="交互模式：多轮对话，history 保持不变")
+    args = p.parse_args(argv)
+
+    if args.selfcheck:
+        return selfcheck()
+
+    agent = _init_agent()
+
+    if args.interactive:
+        # ── 交互模式 ────────────────────────────────────────
+        print("[交互] mini-OpenClaw 交互模式（输入 exit/quit 退出，new 清空历史）")
+        print("─" * 50)
+        while True:
+            try:
+                user_input = input(">>> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit"):
+                break
+            if user_input.lower() == "new":
+                agent.reset()
+                print("[重置] 历史已清空")
+                continue
+
+            print(agent.chat(user_input))
+            print("─" * 50)
+
+        return 0
+
+    # ── 单次任务模式 ────────────────────────────────────────
+    if not args.task:
+        return selfcheck()
+
     print(agent.run(args.task))
     return 0
 

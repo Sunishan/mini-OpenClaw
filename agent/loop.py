@@ -9,7 +9,7 @@
       else:
           return assistant.content                                 # 最终答复
 
-Day5 你要把下面的 run() 真正实现出来（Day6 随工具集扩展完善）。骨架已给出结构与防呆上限。
+支持单次 run() 和多次 chat() 两种模式。
 """
 from __future__ import annotations
 from typing import Any
@@ -24,42 +24,65 @@ class AgentLoop:
         self.backend = backend
         self.registry = registry
         self.system_prompt = system_prompt
-        self.max_turns = max_turns          # 防死循环：硬上限
+        self.max_turns = max_turns
+        self.messages: list[dict[str, Any]] = []   # 跨轮对话的消息历史
 
     def run(self, user_task: str) -> str:
-        messages: list[dict[str, Any]] = [
+        """单次执行：从头开始，跑完即止。"""
+        self.messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_task},
         ]
-        print(f"📋 任务: {user_task}")
+        return self._execute()
+
+    def chat(self, user_input: str) -> str:
+        """多轮对话：保留历史消息，追加用户输入后继续执行。
+
+        首次调用会自动插入 system prompt。
+        """
+        if not self.messages:
+            self.messages = [{"role": "system", "content": self.system_prompt}]
+        self.messages.append({"role": "user", "content": user_input})
+        return self._execute()
+
+    def reset(self) -> None:
+        """清空对话历史。"""
+        self.messages = []
+
+    def _execute(self) -> str:
+        """ReAct 主循环：从当前 messages 开始执行，返回最终答复。"""
+        if not self.messages:
+            return ""
+
+        print(f"[任务] 当前消息数: {len(self.messages)}")
 
         for turn in range(self.max_turns):
             print(f"\n── 第 {turn+1}/{self.max_turns} 轮 ──")
-            assistant = self.backend.chat(messages, tools=self.registry.schemas())
-            messages.append({"role": "assistant",
-                             "content": assistant.get("content", ""),
-                             "tool_calls": assistant.get("tool_calls", [])})
+            assistant = self.backend.chat(self.messages, tools=self.registry.schemas())
+            self.messages.append({"role": "assistant",
+                                  "content": assistant.get("content", ""),
+                                  "tool_calls": assistant.get("tool_calls", [])})
 
-            # 显示模型的思考内容（思维链）
+            # 显示模型的思考内容
             thought = assistant.get("content", "")
             if thought:
                 for line in thought.strip().splitlines():
-                    print(f"  💭 {line}")
+                    print(f"  [思考] {line}")
 
             tool_calls = assistant.get("tool_calls") or []
             if not tool_calls:
-                print(f"\n✅ 最终回答:")
+                print(f"\n[完成] 最终回答:")
                 print(f"  {thought}")
                 return thought
 
-            # 分发并执行工具，把每个结果作为 role="tool" 注入 messages：
+            # 分发并执行工具
             for i, call in enumerate(tool_calls):
                 call_id = call.get("id") or f"call_{i}"
                 name = call["name"]
                 args = call.get("arguments", {})
-                print(f"\n  🔧 调用工具: {name}")
+                print(f"\n  [工具] 调用: {name}")
                 for k, v in args.items():
-                    v_preview = str(v)[:200] + "…" if len(str(v)) > 200 else str(v)
+                    v_preview = str(v)[:200] + "..." if len(str(v)) > 200 else str(v)
                     print(f"      {k} = {v_preview}")
 
                 tool = self.registry.get(name)
@@ -71,15 +94,14 @@ class AgentLoop:
                     except Exception as e:  # noqa
                         obs = f"工具 {name} 执行出错：{e}"
 
-                # 截断过长的工具结果，只显示关键部分
-                obs_preview = str(obs)[:500] + "…" if len(str(obs)) > 500 else str(obs)
-                print(f"  📝 结果: {obs_preview}")
+                obs_preview = str(obs)[:500] + "..." if len(str(obs)) > 500 else str(obs)
+                print(f"  [结果] {obs_preview}")
 
-                messages.append({"role": "tool", "name": name,
-                                 "tool_call_id": call_id,
-                                 "content": truncate_observation(str(obs))})
+                self.messages.append({"role": "tool", "name": name,
+                                      "tool_call_id": call_id,
+                                      "content": truncate_observation(str(obs))})
 
-            messages = maybe_compact(messages, self.backend)
+            self.messages = maybe_compact(self.messages, self.backend)
 
-        print("\n⚠️ 已达到最大轮数上限")
+        print("\n[警告] 已达到最大轮数上限")
         return "[达到最大轮数上限，未完成任务]"
