@@ -38,6 +38,14 @@ def selfcheck() -> int:
     except Exception as e:  # noqa
         print(f"[FAIL] 主循环：{e}"); ok = False
 
+    try:
+        from skills.loader import load_skills
+        skills = load_skills()
+        names = ", ".join(s.name for s in skills) or "(无)"
+        print(f"[ok] Skills 可加载：{names}")
+    except Exception as e:  # noqa
+        print(f"[FAIL] Skills：{e}"); ok = False
+
     print("== 自检", "通过" if ok else "未通过", "==")
     return 0 if ok else 1
 
@@ -45,7 +53,23 @@ def selfcheck() -> int:
 def _init_agent():
     """初始化 backend 和 AgentLoop。"""
     from agent.loop import AgentLoop
+
     reg = build_default_registry()
+    base_prompt = SYSTEM_PROMPT.format(
+        current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        current_location="浙江省 杭州市",
+    )
+    system_prompt = base_prompt
+
+    try:
+        from skills.loader import load_skills, make_load_skill_tool, render_skill_catalog
+        skills = load_skills()
+        if skills:
+            reg.register(make_load_skill_tool(skills))
+            system_prompt = base_prompt + "\n\n" + render_skill_catalog(skills)
+            print(f"[ok] Skills 已发现：{', '.join(s.name for s in skills)}")
+    except Exception as e:  # noqa
+        print(f"[提示] Skills 未接入（{e}），继续使用基础提示词。")
 
     from mcp.client import MCPClient, register_mcp_tools
     try:
@@ -91,10 +115,6 @@ def _init_agent():
         from backend.fake_backend import FakeBackend
         print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
         backend = FakeBackend()
-    system_prompt = SYSTEM_PROMPT.format(
-        current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        current_location="浙江省 杭州市",
-    )
 
     return AgentLoop(backend, reg, system_prompt)
 
@@ -109,11 +129,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.selfcheck:
         return selfcheck()
+    if not args.interactive and not args.task:
+        return selfcheck()
 
     agent = _init_agent()
 
     if args.interactive:
-        # ── 交互模式 ────────────────────────────────────────
         print("[交互] mini-OpenClaw 交互模式（输入 exit/quit 退出，new 清空历史）")
         print("─" * 50)
         while True:
@@ -136,10 +157,6 @@ def main(argv: list[str] | None = None) -> int:
             print("─" * 50)
 
         return 0
-
-    # ── 单次任务模式 ────────────────────────────────────────
-    if not args.task:
-        return selfcheck()
 
     print(agent.run(args.task))
     return 0
