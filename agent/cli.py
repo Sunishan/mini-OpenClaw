@@ -3,11 +3,9 @@
 用法：
   python -m agent.cli --selfcheck                     # Day1：自检骨架是否装好
   python -m agent.cli "创建 hello.py 并运行"             # Day5 起：真正跑任务（v1 在 Day6）
-  python -m agent.cli --playwright-mcp "打开动态网页并分析"
 """
 from __future__ import annotations
 import argparse
-import os
 import sys
 
 from tools.base import build_default_registry
@@ -45,8 +43,6 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mini-openclaw")
     p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
     p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
-    p.add_argument("--playwright-mcp", action="store_true",
-                   help="启用 Playwright MCP 浏览器工具（需要 node/npx，可用于动态网页）")
     args = p.parse_args(argv)
 
     if args.selfcheck or not args.task:
@@ -63,15 +59,13 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa
         print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
 
-    use_playwright = args.playwright_mcp or os.environ.get("OPENCLAW_PLAYWRIGHT_MCP") == "1"
-    if use_playwright:
-        try:
-            pw_mcp = MCPClient(["npx", "-y", "@playwright/mcp@latest"])
-            pw_mcp.start()
-            register_mcp_tools(reg, pw_mcp)
-            print("[ok] Playwright MCP 已接入。")
-        except Exception as e:  # noqa
-            print(f"[提示] Playwright MCP 未接入（{e}），继续使用其它工具。")
+    try:
+        pw_mcp = MCPClient(["npx", "-y", "@playwright/mcp@latest"])
+        pw_mcp.start()
+        register_mcp_tools(reg, pw_mcp)
+        print("[ok] Playwright MCP 已接入。")
+    except Exception as e:  # noqa
+        print(f"[提示] Playwright MCP 未接入（{e}），继续使用其它工具。")
 
     # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     try:
