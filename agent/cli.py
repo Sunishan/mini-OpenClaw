@@ -6,47 +6,163 @@
   python -m agent.cli -i                                 # 交互模式（多轮对话）
 """
 from __future__ import annotations
+
 import argparse
 import os
 import sys
-
 from datetime import datetime
 
-from tools.base import build_default_registry
 from agent.prompts import SYSTEM_PROMPT
+from tools.base import build_default_registry
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except ImportError:  # pragma: no cover - only used before optional UI dependency is installed
+    Console = None  # type: ignore[assignment]
+    Panel = None  # type: ignore[assignment]
+    Table = None  # type: ignore[assignment]
+
+
+RICH_AVAILABLE = Console is not None
+console = Console() if RICH_AVAILABLE else None
+
+
+def _print(message: object = "") -> None:
+    if console is not None:
+        console.print(message)
+    else:
+        print(message)
+
+
+def _notice(message: str) -> None:
+    if console is not None:
+        console.print(f"[dim]{message}[/dim]")
+    else:
+        print(message)
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def welcome() -> None:
+    """显示交互模式欢迎页。"""
+    cat = r"""
+        /\_____/\ 
+       /  o   o  \
+      ( ==  ^  == )
+       )         (
+      (           )
+     ( (  )   (  ) )
+    (__(__)___(__)__)
+     |           |
+     |  -------  |
+     | |       | |
+     | |  mini | |
+     |_| OpenClaw|_|
+"""
+    if console is not None and Panel is not None:
+        console.print(f"[bold magenta]{cat}[/bold magenta]")
+        console.print(Panel(
+            "[bold cyan]mini-OpenClaw 智能助手[/bold cyan]\n"
+            "[dim]直接输入自然语言任务；输入 new 可清空历史。[/dim]",
+            border_style="magenta",
+            padding=(1, 1),
+        ))
+        console.print("  [green]▸[/green] [yellow]帮我创建一个 hello.py 并运行[/yellow]")
+        console.print("  [green]▸[/green] [yellow]分析一下项目结构[/yellow]")
+        console.print("  [green]▸[/green] [yellow]判断这个网页的可信度 https://example.com[/yellow]")
+        console.print()
+        console.print("  [dim]输入 [bold]exit[/bold]/[bold]quit[/bold] 或 Ctrl+D 退出[/dim]")
+        console.print()
+        return
+
+    print(cat)
+    print("mini-OpenClaw 智能助手")
+    print("直接输入自然语言任务；输入 new 可清空历史。")
+    print("示例：帮我创建一个 hello.py 并运行")
+    print("示例：分析一下项目结构")
+    print("输入 exit/quit 或 Ctrl+D 退出")
+    print()
 
 
 def selfcheck() -> int:
-    print("== mini-OpenClaw 自检 ==")
+    """骨架自检：验证核心模块能否正常导入和运行。"""
+    if console is not None and Panel is not None:
+        console.print(Panel("[bold]mini-OpenClaw 自检[/bold]", border_style="blue"))
+    else:
+        print("== mini-OpenClaw 自检 ==")
+
     ok = True
+    checks: list[tuple[str, str, str]] = []
+
     try:
         reg = build_default_registry()
-        print(f"[ok] 工具注册表加载成功，当前内置工具数：{len(reg)}")
-    except Exception as e:  # noqa
-        print(f"[FAIL] 工具注册表：{e}"); ok = False
+        checks.append(("工具注册表", "ok", f"加载成功，当前内置工具数：{len(reg)}"))
+    except Exception as e:  # noqa: BLE001
+        checks.append(("工具注册表", "fail", str(e)))
+        ok = False
 
     try:
         from backend.fake_backend import FakeBackend
+
         FakeBackend().chat([{"role": "user", "content": "hi"}], tools=[])
-        print("[ok] FakeBackend 可用（未配 DEEPSEEK_API_KEY 时的离线占位后端）")
-    except Exception as e:  # noqa
-        print(f"[FAIL] FakeBackend：{e}"); ok = False
+        checks.append(("FakeBackend", "ok", "离线占位后端可用"))
+    except Exception as e:  # noqa: BLE001
+        checks.append(("FakeBackend", "fail", str(e)))
+        ok = False
 
     try:
-        from agent.loop import AgentLoop  # noqa
-        print("[ok] 主循环模块可导入")
-    except Exception as e:  # noqa
-        print(f"[FAIL] 主循环：{e}"); ok = False
+        from agent.loop import AgentLoop  # noqa: F401
+
+        checks.append(("主循环模块", "ok", "可导入"))
+    except Exception as e:  # noqa: BLE001
+        checks.append(("主循环模块", "fail", str(e)))
+        ok = False
 
     try:
         from skills.loader import load_skills
+
         skills = load_skills()
         names = ", ".join(s.name for s in skills) or "(无)"
-        print(f"[ok] Skills 可加载：{names}")
-    except Exception as e:  # noqa
-        print(f"[FAIL] Skills：{e}"); ok = False
+        checks.append(("Skills", "ok", f"可加载：{names}"))
+    except Exception as e:  # noqa: BLE001
+        checks.append(("Skills", "fail", str(e)))
+        ok = False
 
-    print("== 自检", "通过" if ok else "未通过", "==")
+    if RICH_AVAILABLE:
+        checks.append(("Rich 终端展示", "ok", "已安装"))
+    else:
+        checks.append(("Rich 终端展示", "warn", "未安装，将使用纯文本降级；运行 pip install -r requirements.txt"))
+
+    if console is not None and Table is not None and Panel is not None:
+        table = Table(title="自检结果", border_style="blue")
+        table.add_column("检查项", style="cyan", width=18)
+        table.add_column("状态", width=10)
+        table.add_column("详情", style="dim")
+        status_text = {
+            "ok": "[green]通过[/green]",
+            "warn": "[yellow]降级[/yellow]",
+            "fail": "[red]失败[/red]",
+        }
+        for name, status, detail in checks:
+            table.add_row(name, status_text[status], detail)
+        console.print(table)
+        if ok:
+            console.print(Panel("[green bold]自检通过[/green bold]", border_style="green"))
+        else:
+            console.print(Panel("[red bold]自检未通过[/red bold]", border_style="red"))
+    else:
+        for name, status, detail in checks:
+            label = {"ok": "[ok]", "warn": "[warn]", "fail": "[FAIL]"}[status]
+            print(f"{label} {name}：{detail}")
+        print("== 自检", "通过" if ok else "未通过", "==")
+
     return 0 if ok else 1
 
 
@@ -63,34 +179,45 @@ def _init_agent():
 
     try:
         from skills.loader import load_skills, make_load_skill_tool, render_skill_catalog
+
         skills = load_skills()
         if skills:
             reg.register(make_load_skill_tool(skills))
             system_prompt = base_prompt + "\n\n" + render_skill_catalog(skills)
-            print(f"[ok] Skills 已发现：{', '.join(s.name for s in skills)}")
-    except Exception as e:  # noqa
-        print(f"[提示] Skills 未接入（{e}），继续使用基础提示词。")
+            _print(
+                f"[green][ok][/green] Skills 已发现：{', '.join(s.name for s in skills)}"
+                if console
+                else f"[ok] Skills 已发现：{', '.join(s.name for s in skills)}"
+            )
+    except Exception as e:  # noqa: BLE001
+        _notice(f"[提示] Skills 未接入（{e}），继续使用基础提示词。")
 
     from mcp.client import MCPClient, register_mcp_tools
+
     try:
-        mcp = MCPClient(["python", "mcp/echo_server.py"])
+        mcp = MCPClient(
+            ["python", "mcp/echo_server.py"],
+            timeout_seconds=_env_float("MCP_ECHO_TIMEOUT_SECONDS", 5),
+        )
         mcp.start()
         register_mcp_tools(reg, mcp)
-    except Exception as e:  # noqa
-        print(f"[提示] MCP 未接入（{e}），仅用内置工具。")
+    except Exception as e:  # noqa: BLE001
+        _notice(f"[提示] MCP 未接入（{e}），仅用内置工具。")
 
     try:
         pw_mcp = MCPClient([
-            "npx", "-y", "@playwright/mcp@latest",
+            "npx",
+            "-y",
+            "@playwright/mcp@latest",
             "--headless",
             "--isolated",
             "--ignore-https-errors",
-        ])
+        ], timeout_seconds=_env_float("MCP_NPX_TIMEOUT_SECONDS", 12))
         pw_mcp.start()
         register_mcp_tools(reg, pw_mcp)
-        print("[ok] Playwright MCP 已接入。")
-    except Exception as e:  # noqa
-        print(f"[提示] Playwright MCP 未接入（{e}），继续使用其它工具。")
+        _print("[green][ok][/green] Playwright MCP 已接入。" if console else "[ok] Playwright MCP 已接入。")
+    except Exception as e:  # noqa: BLE001
+        _notice(f"[提示] Playwright MCP 未接入（{e}），继续使用其它工具。")
 
     firecrawl_key = os.environ.get("FIRECRAWL_API_KEY")
     if firecrawl_key:
@@ -98,22 +225,25 @@ def _init_agent():
             firecrawl_mcp = MCPClient(
                 ["npx", "-y", "firecrawl-mcp"],
                 env={"FIRECRAWL_API_KEY": firecrawl_key},
+                timeout_seconds=_env_float("MCP_NPX_TIMEOUT_SECONDS", 12),
             )
             firecrawl_mcp.start()
             register_mcp_tools(reg, firecrawl_mcp)
-            print("[ok] Firecrawl MCP 已接入。")
-        except Exception as e:  # noqa
-            print(f"[提示] Firecrawl MCP 未接入（{e}），继续使用其它工具。")
+            _print("[green][ok][/green] Firecrawl MCP 已接入。" if console else "[ok] Firecrawl MCP 已接入。")
+        except Exception as e:  # noqa: BLE001
+            _notice(f"[提示] Firecrawl MCP 未接入（{e}），继续使用其它工具。")
     else:
-        print("[提示] 未设置 FIRECRAWL_API_KEY，跳过 Firecrawl MCP。")
+        _notice("[提示] 未设置 FIRECRAWL_API_KEY，跳过 Firecrawl MCP。")
 
     # 真正跑任务：优先用 DeepSeek API；没配 key 时回退到 FakeBackend（离线打通管道）
     try:
         from backend.client import DeepSeekBackend
+
         backend = DeepSeekBackend()
-    except Exception as e:  # noqa
+    except Exception as e:  # noqa: BLE001
         from backend.fake_backend import FakeBackend
-        print(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
+
+        _notice(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
         backend = FakeBackend()
 
     return AgentLoop(backend, reg, system_prompt)
@@ -123,42 +253,44 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mini-openclaw")
     p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
     p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
-    p.add_argument("-i", "--interactive", action="store_true",
-                   help="交互模式：多轮对话，history 保持不变")
+    p.add_argument("-i", "--interactive", action="store_true", help="交互模式：多轮对话，history 保持不变")
     args = p.parse_args(argv)
 
     if args.selfcheck:
         return selfcheck()
     if not args.interactive and not args.task:
-        return selfcheck()
+        p.print_help()
+        return 2
 
     agent = _init_agent()
 
     if args.interactive:
-        print("[交互] mini-OpenClaw 交互模式（输入 exit/quit 退出，new 清空历史）")
-        print("─" * 50)
+        welcome()
         while True:
             try:
-                user_input = input(">>> ").strip()
+                if console is not None:
+                    user_input = console.input("[bold green]▸[/bold green] ").strip()
+                else:
+                    user_input = input(">>> ").strip()
             except (EOFError, KeyboardInterrupt):
-                print()
+                _print()
                 break
 
             if not user_input:
                 continue
-            if user_input.lower() in ("exit", "quit"):
+            if user_input.lower() in ("exit", "quit", "q"):
                 break
             if user_input.lower() == "new":
                 agent.reset()
-                print("[重置] 历史已清空")
+                _print("[cyan][重置][/cyan] 历史已清空" if console else "[重置] 历史已清空")
                 continue
 
-            print(agent.chat(user_input))
-            print("─" * 50)
+            agent.chat(user_input)
+            _print()
 
         return 0
 
-    print(agent.run(args.task))
+    agent.run(args.task)
     return 0
 
 
