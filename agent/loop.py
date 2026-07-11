@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.context import maybe_compact, truncate_observation
+from agent import permissions
 from tools.base import ToolRegistry
 
 try:
@@ -144,11 +145,19 @@ def _save_history(messages: list[dict[str, Any]]) -> None:
 
 
 class AgentLoop:
-    def __init__(self, backend: Any, registry: ToolRegistry, system_prompt: str, max_turns: int = 20):
+    def __init__(
+        self,
+        backend: Any,
+        registry: ToolRegistry,
+        system_prompt: str,
+        max_turns: int = 20,
+        auto_approve: bool = False,
+    ):
         self.backend = backend
         self.registry = registry
         self.system_prompt = system_prompt
         self.max_turns = max_turns
+        self.auto_approve = auto_approve
         self.messages: list[dict[str, Any]] = []   # 跨轮对话的消息历史
         self._history_loaded = False               # 防止重复加载
 
@@ -239,14 +248,23 @@ class AgentLoop:
                 args = call.get("arguments", {})
                 args_str = ", ".join(f"{k}={_preview(v, 120)}" for k, v in args.items())
 
-                tool = self.registry.get(name)
-                if tool is None:
-                    obs = f"错误：未知工具 {name}"
+                verdict = permissions.check(name, args, Path.cwd())
+                if verdict == "deny":
+                    obs = "[权限层] 拒绝：越界写入 / 危险操作"
+                elif verdict == "confirm" and not self.auto_approve:
+                    obs = f"[权限层] 需确认：{name}({args}) —— 已拦截（演示：默认不放行）"
                 else:
-                    try:
-                        obs = tool.run(**args)
-                    except Exception as e:  # noqa: BLE001
-                        obs = f"工具 {name} 执行出错：{e}"
+                    tool = self.registry.get(name)
+                    if tool is None:
+                        obs = f"错误：未知工具 {name}"
+                    else:
+                        try:
+                            obs = tool.run(**args)
+                        except Exception as e:  # noqa: BLE001
+                            obs = f"工具 {name} 执行出错：{e}"
+
+                if self.registry.get(name) is None and verdict != "deny":
+                    obs = f"错误：未知工具 {name}"
 
                 rows.append((str(i + 1), name, args_str, _preview(obs, 500)))
                 self.messages.append({
