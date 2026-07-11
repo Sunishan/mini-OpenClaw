@@ -13,27 +13,32 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 printf "\n"
-printf "${PINK}        /\\_____/\\\n"
-printf "${PINK}       /  o   o  \\\n"
-printf "${PINK}      ( ==  ^  == )\n"
-printf "${PINK}       )         (\n"
-printf "${PINK}      (           )\n"
-printf "${PINK}     ( (  )   (  ) )\n"
-printf "${PINK}    (__(__)___(__)__)\n"
-printf "${PINK}     |           |\n"
-printf "${PINK}     |  -------  |\n"
-printf "${PINK}     | |       | |\n"
-printf "${PINK}     | |  mini | |\n"
-printf "${PINK}     |_| OpenClaw|_|\n"
+printf "%b" "$PINK"
+cat <<'EOF'
+        /\_____/\
+       /  o   o  \
+      ( ==  ^  == )
+       )         (
+      (           )
+     ( (  )   (  ) )
+    (__(__)___(__)__)
+     |           |
+     |  -------  |
+     | |       | |
+     | |  mini | |
+     |_| OpenClaw|_|
+EOF
+printf "%b" "$RESET"
 printf "\n"
-printf "${CYAN}  +------------------------------------------+\n"
-printf "${CYAN}  |  ${BOLD}${WHITE}mini-OpenClaw 智能助手${RESET}${CYAN}                  |\n"
-printf "${CYAN}  |  ${DIM}直接输入自然语言任务即可开始${RESET}${CYAN}             |\n"
-printf "${CYAN}  +------------------------------------------+\n"
+printf "${CYAN}  ------------------------------------------${RESET}\n"
+printf "  ${BOLD}${WHITE}mini-OpenClaw 智能助手${RESET}\n"
+printf "  ${DIM}选择下面的命令入口开始使用${RESET}\n"
+printf "${CYAN}  ------------------------------------------${RESET}\n"
 printf "\n"
-printf "  ${GREEN}>${RESET} 单次任务：${YELLOW}ask \"创建一个 hello.py 并运行\"${RESET}\n"
-printf "  ${GREEN}>${RESET} 交互模式：${YELLOW}ask -i${RESET}\n"
-printf "  ${GREEN}>${RESET} 自检：${YELLOW}check${RESET}\n"
+printf "  ${GREEN}>${RESET} 单次任务：${YELLOW}python -m agent.cli \"判断这个网页的可信度 https://example.com\"${RESET}\n"
+printf "  ${GREEN}>${RESET} 多轮交互：${YELLOW}python -m agent.cli -i${RESET}\n"
+printf "  ${GREEN}>${RESET} 系统自检：${YELLOW}python -m agent.cli --selfcheck${RESET}\n"
 printf "\n"
-printf "  ${DIM}输入 exit 或 Ctrl+D 退出 shell${RESET}\n"
+printf "  ${DIM}单次任务请把自然语言问题写在命令末尾的引号里${RESET}\n"
+printf "  ${DIM}进入多轮交互后，可以直接输入自然语言问题${RESET}\n"
 printf "\n"

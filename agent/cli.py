@@ -53,7 +53,7 @@ def _env_float(name: str, default: float) -> float:
 def welcome() -> None:
     """显示交互模式欢迎页。"""
     cat = r"""
-        /\_____/\ 
+        /\_____/\
        /  o   o  \
       ( ==  ^  == )
        )         (
@@ -69,25 +69,24 @@ def welcome() -> None:
     if console is not None and Panel is not None:
         console.print(f"[bold magenta]{cat}[/bold magenta]")
         console.print(Panel(
-            "[bold cyan]mini-OpenClaw 智能助手[/bold cyan]\n"
-            "[dim]直接输入自然语言任务；输入 new 可清空历史。[/dim]",
+            "[bold cyan]mini-OpenClaw 交互模式[/bold cyan]\n"
+            "[dim]直接输入问题或任务；输入 new 清空历史，exit 退出。[/dim]",
             border_style="magenta",
             padding=(1, 1),
+            expand=False,
         ))
-        console.print("  [green]▸[/green] [yellow]帮我创建一个 hello.py 并运行[/yellow]")
-        console.print("  [green]▸[/green] [yellow]分析一下项目结构[/yellow]")
         console.print("  [green]▸[/green] [yellow]判断这个网页的可信度 https://example.com[/yellow]")
-        console.print()
-        console.print("  [dim]输入 [bold]exit[/bold]/[bold]quit[/bold] 或 Ctrl+D 退出[/dim]")
+        console.print("  [green]▸[/green] [yellow]提取这篇文章里的核心事实主张[/yellow]")
+        console.print("  [green]▸[/green] [yellow]继续解释上一轮证据中最关键的矛盾点[/yellow]")
         console.print()
         return
 
     print(cat)
-    print("mini-OpenClaw 智能助手")
-    print("直接输入自然语言任务；输入 new 可清空历史。")
-    print("示例：帮我创建一个 hello.py 并运行")
-    print("示例：分析一下项目结构")
-    print("输入 exit/quit 或 Ctrl+D 退出")
+    print("mini-OpenClaw 交互模式")
+    print("直接输入问题或任务；输入 new 清空历史，exit 退出。")
+    print("示例：判断这个网页的可信度 https://example.com")
+    print("示例：提取这篇文章里的核心事实主张")
+    print("示例：继续解释上一轮证据中最关键的矛盾点")
     print()
 
 
