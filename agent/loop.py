@@ -134,11 +134,23 @@ def _load_history() -> list[dict[str, Any]]:
 
 
 def _save_history(messages: list[dict[str, Any]]) -> None:
-    """保存历史消息到文件（只保留非 tool 消息，节省空间）。"""
+    """保存历史消息到文件（只保留非 tool 消息，节省空间）。
+
+    注意：由于 tool 结果被丢弃，assistant 消息中的 tool_calls
+    也必须清空，否则 DeepSeek/OpenAI API 会拒绝请求（
+    "assistant message with tool_calls must be followed
+     by tool messages"）。
+    """
     try:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        # 只保留 system + user + assistant（含 tool_calls），去掉 tool 结果
-        condensed = [m for m in messages if m.get("role") in ("system", "user", "assistant")]
+        condensed = []
+        for m in messages:
+            if m.get("role") not in ("system", "user", "assistant"):
+                continue
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                # 丢弃 tool_calls，因为对应的 tool 结果已被删除
+                m = {"role": "assistant", "content": m.get("content", "")}
+            condensed.append(m)
         HISTORY_FILE.write_text(json.dumps(condensed, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass

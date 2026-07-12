@@ -84,10 +84,19 @@ def clear_trust() -> None:
     _NETWORK_DOMAIN_TRUST.clear()
 
 
+# 安全的写入操作：只写固定位置的项目文件，无路径参数风险
+SAFE_LOCAL_WRITE = {
+    "remember",
+}
+
+
 def check(tool: str, args: dict, workdir: Path) -> str:
     """Return one of: 'allow', 'confirm', 'deny'."""
     args = args or {}
     root = workdir.resolve()
+
+    if tool in SAFE_LOCAL_WRITE:
+        return "allow"
 
     if tool.startswith("mcp__"):
         return "confirm"
