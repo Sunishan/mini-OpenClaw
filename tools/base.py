@@ -72,6 +72,10 @@ def build_default_registry() -> ToolRegistry:
     from .search import web_search_tool
     reg.register(web_search_tool)
 
+    # ── 注册长期记忆工具 ────────────────────────────────
+    from .remember import remember_tool
+    reg.register(remember_tool)
+
     # ── 注册 credibility 工具集 ──────────────────────────
     from .credibility import register_credibility_tools
     register_credibility_tools(reg)
