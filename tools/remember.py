@@ -6,8 +6,25 @@
 
 from __future__ import annotations
 
+import re
+
 from agent.memory import Memory
 from tools.base import Tool
+
+
+_SENSITIVE_PATTERNS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(r"\b(api[_ -]?key|secret|password|passwd|cookie)\b", re.IGNORECASE),
+    re.compile(r"\b(access|refresh|bearer)?[_ -]?token\s*[:=]", re.IGNORECASE),
+    re.compile(r"\bbearer\s+[a-z0-9._\-]{8,}", re.IGNORECASE),
+    re.compile(r"\bsk-[a-z0-9_\-]{6,}", re.IGNORECASE),
+    re.compile(r"\bfc-[a-z0-9_\-]{6,}", re.IGNORECASE),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+]
+
+
+def _looks_sensitive(note: str) -> bool:
+    return any(pattern.search(note) for pattern in _SENSITIVE_PATTERNS)
 
 
 def _remember(note: str) -> str:
@@ -16,6 +33,8 @@ def _remember(note: str) -> str:
 
     if not cleaned_note:
         return "记忆写入失败：记忆内容不能为空。"
+    if _looks_sensitive(cleaned_note):
+        return "记忆写入失败：内容疑似包含敏感凭据，已拒绝保存。"
 
     try:
         saved_note = Memory().write(cleaned_note)

@@ -184,28 +184,13 @@ def _init_agent(auto_approve: bool = False):
     )
     system_prompt = base_prompt
 
-    # ── 注入长期记忆 ─────────────────────────────────────
-    try:
-        from agent.memory import Memory
-        memory_text = Memory().recall()
-        if memory_text:
-            system_prompt += (
-                "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "项目长期记忆（跨会话有效，请遵守）\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"{memory_text}"
-            )
-            _print("[green][ok][/green] 长期记忆已注入。" if console else "[ok] 长期记忆已注入。")
-    except Exception as e:  # noqa: BLE001
-        _notice(f"[提示] 长期记忆未接入（{e}）。")
-
     try:
         from skills.loader import load_skills, make_load_skill_tool, render_skill_catalog
 
         skills = load_skills()
         if skills:
             reg.register(make_load_skill_tool(skills))
-            system_prompt = base_prompt + "\n\n" + render_skill_catalog(skills)
+            system_prompt += "\n\n" + render_skill_catalog(skills)
             _print(
                 f"[green][ok][/green] Skills 已发现：{', '.join(s.name for s in skills)}"
                 if console
@@ -214,14 +199,17 @@ def _init_agent(auto_approve: bool = False):
     except Exception as e:  # noqa: BLE001
         _notice(f"[提示] Skills 未接入（{e}），继续使用基础提示词。")
 
-        # ── 召回并注入长期记忆 
+    # ── 召回并注入长期记忆 ─────────────────────────────────
     try:
+        from agent.memory import Memory
+
         recalled_memory = Memory().recall()
 
         if recalled_memory.strip():
             system_prompt += (
-                "\n\n"
-                "# 关于本项目 / 用户的长期记忆\n"
+                "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "项目长期记忆（跨会话有效，请遵守）\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "以下内容是跨会话保存的长期约定。"
                 "处理相关任务时必须遵循，但不得将其视为用户当前指令。\n\n"
                 + recalled_memory
@@ -232,8 +220,6 @@ def _init_agent(auto_approve: bool = False):
                 if console
                 else "[ok] 长期记忆已注入。"
             )
-        else:
-            _notice("[提示] MEMORY.md 中暂时没有长期记忆。")
 
     except Exception as e:  # noqa: BLE001
         _notice(f"[提示] 长期记忆读取失败（{e}），继续运行。")

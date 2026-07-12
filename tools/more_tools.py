@@ -1,4 +1,4 @@
-"""完整工具集：edit / grep / glob（Day6，→ v1）+ task_list（Day7已被 webpage_reader 替代 web_fetch）。
+"""完整工具集：edit / grep / glob（Day6，→ v1）+ task_list。
 
 每个工具上午讲设计权衡，下午实现。这里只给签名与 TODO，便于你拆到独立文件。
 建议最终拆成 edit.py / search.py / web.py / todo.py，再在 base.build_default_registry 注册。

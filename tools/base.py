@@ -7,7 +7,7 @@
   由主循环（agent/loop.py）解析出来，找到同名 Tool，执行它的 run()，
   再把返回值作为 observation 喂回模型。
 
-Day5 实现 read/write/bash；Day6 补 edit/grep/glob；Day7 补 web_fetch/task_list。
+Day5 实现 read/write/bash；Day6 补 edit/grep/glob；Day7 补 task_list。
 """
 from __future__ import annotations
 from dataclasses import dataclass, field

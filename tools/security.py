@@ -9,7 +9,7 @@
 用法：
     from tools.security import SafeHttpxClient, SecurityConfig
     client = SafeHttpxClient(SecurityConfig.from_env())
-    resp = client.get("https://example.com", _tool_name="web_fetch")
+    resp = client.get("https://example.com", _tool_name="webpage_reader")
 """
 from __future__ import annotations
 

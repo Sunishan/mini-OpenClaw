@@ -1,9 +1,9 @@
-"""工具1：网页读取工具（合并了 web_fetch 功能）。
+"""工具1：网页读取工具。
 
 输入 URL，抓取网页标题、正文、作者、发布时间、来源域名等元信息。
 支持两种输出格式：
   - json（默认）：返回结构化 JSON，含标题/作者/日期/清理后正文
-  - markdown：返回纯 markdown 文本（等效原 web_fetch 工具）
+  - markdown：返回纯 markdown 文本
 使用 httpx + beautifulsoup4 + markdownify 实现。
 """
 from __future__ import annotations
@@ -86,7 +86,7 @@ def _webpage_reader(url: str, max_chars: int = 5000,
 
     支持两种输出格式：
     - "json"（默认）：返回 PageMetadata 结构的 JSON
-    - "markdown"：返回 markdown 纯文本（等效原 web_fetch）
+    - "markdown"：返回 markdown 纯文本
 
     返回字符串。
     """
@@ -192,7 +192,7 @@ def _webpage_reader(url: str, max_chars: int = 5000,
 
 
 def _webpage_reader_markdown(url: str, max_chars: int = 5000) -> str:
-    """轻量路径：抓取 URL 并转为 markdown 文本（等效原 web_fetch）。"""
+    """轻量路径：抓取 URL 并转为 markdown 文本。"""
     try:
         import httpx
         from markdownify import markdownify as md
