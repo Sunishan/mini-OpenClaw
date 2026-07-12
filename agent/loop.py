@@ -196,8 +196,9 @@ class AgentLoop:
         if not self._history_loaded:
             history = _load_history()
             if history and history[0].get("role") == "system":
-                # 有历史，追加当前用户输入
+                # 有历史，但用当前 system_prompt 替换旧的（更新时间戳等动态信息）
                 self.messages = history
+                self.messages[0]["content"] = self.system_prompt
                 self.messages.append({"role": "user", "content": user_task})
                 _print_history_loaded(len(history))
             else:
