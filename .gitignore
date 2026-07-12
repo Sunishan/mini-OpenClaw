@@ -5,3 +5,5 @@ out-*/
 *.bin
 *.gguf
 .DS_Store
+memory.json
+test_kv.json
