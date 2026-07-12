@@ -20,7 +20,23 @@ READONLY = {
 }
 WRITE = {"write", "edit"}
 EXEC = {"bash"}
-NETWORK = {"web_fetch", "webpage_reader", "web_search", "kb_retriever"}
+NETWORK = {"webpage_reader", "web_search", "kb_retriever"}
+
+# 工具结果属于"外部不可信内容"的来源
+# 这些结果在注入 prompt 时会被标记隔离，防止提示注入
+EXTERNAL_SOURCES = {
+    "webpage_reader",
+    "web_search",
+    "kb_retriever",
+}
+
+
+def is_external_source(name: str) -> bool:
+    """判断工具是否返回外部不可信数据。
+
+    覆盖已知外部来源工具 + 所有 mcp__* 前缀工具。
+    """
+    return name in EXTERNAL_SOURCES or name.startswith("mcp__")
 
 SENSITIVE_PARTS = {".ssh", ".env", ".git-credentials"}
 SENSITIVE_PATHS = {"/etc/shadow", "/etc/sudoers"}
@@ -46,6 +62,26 @@ def _is_sensitive(path: Path) -> bool:
     if as_posix in SENSITIVE_PATHS:
         return True
     return any(part in SENSITIVE_PARTS for part in path.parts)
+
+
+# ── 域信任缓存（供交互式确认使用）──────────────────────────
+# 键为 "{tool}:{domain}"，值为 True 表示已信任
+_NETWORK_DOMAIN_TRUST: dict[str, bool] = {}
+
+
+def trust_domain(tool: str, domain: str) -> None:
+    """标记某个工具的某个域名为已信任（本次会话有效）。"""
+    _NETWORK_DOMAIN_TRUST[f"{tool}:{domain.lower()}"] = True
+
+
+def is_domain_trusted(tool: str, domain: str) -> bool:
+    """检查某个工具的某个域名是否已信任。"""
+    return _NETWORK_DOMAIN_TRUST.get(f"{tool}:{domain.lower()}", False)
+
+
+def clear_trust() -> None:
+    """清空所有域信任记录（用于 reset）。"""
+    _NETWORK_DOMAIN_TRUST.clear()
 
 
 def check(tool: str, args: dict, workdir: Path) -> str:

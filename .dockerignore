@@ -1,5 +1,6 @@
 .git
 .gitignore
+.gitattributes
 
 __pycache__/
 *.py[cod]
@@ -20,10 +21,20 @@ node_modules/
 npm-debug.log*
 
 .playwright-mcp/
+ms-playwright/
 *.log
 
 build/
 dist/
 *.egg-info/
 
+demo/
+out-*/
+*.gguf
+*.bin
+
 report.md
+*.md~
+.DS_Store
+
+.claude/

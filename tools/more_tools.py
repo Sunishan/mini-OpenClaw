@@ -1,4 +1,4 @@
-"""完整工具集：edit / grep / glob（Day6，→ v1）+ web_fetch / task_list（Day7）。
+"""完整工具集：edit / grep / glob（Day6，→ v1）+ task_list（Day7已被 webpage_reader 替代 web_fetch）。
 
 每个工具上午讲设计权衡，下午实现。这里只给签名与 TODO，便于你拆到独立文件。
 建议最终拆成 edit.py / search.py / web.py / todo.py，再在 base.build_default_registry 注册。
@@ -52,18 +52,6 @@ def _glob(pattern: str, max_items: int = 100) -> str:
     return "\n".join(paths)
 
 
-# --- web_fetch：URL -> markdown，控 token 预算 ---
-def _web_fetch(url: str, max_tokens: int = 2000) -> str:
-    import httpx
-    from markdownify import markdownify as md
-    from agent.context import truncate_observation
-
-    resp = httpx.get(url, timeout=20, follow_redirects=True)
-    resp.raise_for_status()
-    text = md(resp.text)
-    return truncate_observation(text, max_chars=max_tokens * 4)
-
-
 # --- task_list（TodoWrite）：自维护待办，提升长任务成功率 ---
 def _task_list(action: str, items: list | None = None) -> str:
     # TODO[Day7] 维护一个结构化待办（add/update/complete），作为模型的 scratchpad
@@ -105,9 +93,6 @@ glob_tool = Tool(
      "required": ["pattern"]},
     _glob,
 )
-web_fetch_tool = Tool("web_fetch", "抓取 URL 并转为 markdown（受 token 预算限制）。",
-                      {"type": "object", "properties": {"url": {"type": "string"}},
-                       "required": ["url"]}, _web_fetch)
 task_list_tool = Tool("task_list", "维护任务待办清单（add/update/complete）。",
                       {"type": "object", "properties": {"action": {"type": "string"},
                        "items": {"type": "array"}}, "required": ["action"]}, _task_list)

@@ -7,9 +7,16 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     MCP_ECHO_TIMEOUT_SECONDS=5 \
-    MCP_NPX_TIMEOUT_SECONDS=60
+    MCP_NPX_TIMEOUT_SECONDS=60 \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8
 
 WORKDIR /app
+
+# ── 国内镜像加速（apt + pip）──
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # System tools:
 # - ripgrep: required by the built-in grep tool
@@ -33,6 +40,7 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm config set registry https://registry.npmmirror.com \
     && node --version \
     && npm --version \
     && npx --version

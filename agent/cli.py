@@ -165,7 +165,7 @@ def selfcheck() -> int:
     return 0 if ok else 1
 
 
-def _init_agent():
+def _init_agent(auto_approve: bool = False):
     """初始化 backend 和 AgentLoop。"""
     from agent.loop import AgentLoop
 
@@ -245,13 +245,20 @@ def _init_agent():
         _notice(f"[提示] 未启用真后端（{e}），回退 FakeBackend。")
         backend = FakeBackend()
 
-    return AgentLoop(backend, reg, system_prompt)
+    # 读取 OPENCLAW_INTERACTIVE 环境变量，判断是否启用交互式确认
+    interactive_mode = os.environ.get("OPENCLAW_INTERACTIVE", "1").lower() in ("1", "true", "yes")
+
+    return AgentLoop(backend, reg, system_prompt,
+                     auto_approve=auto_approve,
+                     interactive_mode=interactive_mode)
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mini-openclaw")
     p.add_argument("task", nargs="?", help="要让 agent 完成的任务（自然语言）")
     p.add_argument("--selfcheck", action="store_true", help="只做骨架自检")
+    p.add_argument("--auto-approve", action="store_true",
+                   help="自动批准所有确认级操作（危险，仅用于自动化场景）")
     p.add_argument("-i", "--interactive", action="store_true", help="交互模式：多轮对话，history 保持不变")
     args = p.parse_args(argv)
 
@@ -261,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         p.print_help()
         return 2
 
-    agent = _init_agent()
+    agent = _init_agent(auto_approve=args.auto_approve)
 
     if args.interactive:
         welcome()

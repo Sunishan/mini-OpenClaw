@@ -68,9 +68,6 @@ def build_default_registry() -> ToolRegistry:
     for t in (edit_tool, grep_tool, glob_tool):
         reg.register(t)
 
-    from .more_tools import web_fetch_tool
-    reg.register(web_fetch_tool)
-
     # ── 注册搜索工具 ──────────────────────────────────
     from .search import web_search_tool
     reg.register(web_search_tool)

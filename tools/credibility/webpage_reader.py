@@ -1,7 +1,10 @@
-"""工具1：网页读取工具。
+"""工具1：网页读取工具（合并了 web_fetch 功能）。
 
 输入 URL，抓取网页标题、正文、作者、发布时间、来源域名等元信息。
-使用 httpx + beautifulsoup4 实现。
+支持两种输出格式：
+  - json（默认）：返回结构化 JSON，含标题/作者/日期/清理后正文
+  - markdown：返回纯 markdown 文本（等效原 web_fetch 工具）
+使用 httpx + beautifulsoup4 + markdownify 实现。
 """
 from __future__ import annotations
 from urllib.parse import urlparse
@@ -77,11 +80,21 @@ def _extract_meta(soup: "BeautifulSoup", name: str) -> str:
     return ""
 
 
-def _webpage_reader(url: str, max_chars: int = 5000) -> str:
-    """核心函数：抓取网页并提取结构化元信息。
+def _webpage_reader(url: str, max_chars: int = 5000,
+                    output_format: str = "json") -> str:
+    """核心函数：抓取网页并提取内容。
 
-    返回 JSON 字符串（PageMetadata 格式）。
+    支持两种输出格式：
+    - "json"（默认）：返回 PageMetadata 结构的 JSON
+    - "markdown"：返回 markdown 纯文本（等效原 web_fetch）
+
+    返回字符串。
     """
+    # ── 提前返回 markdown（不走 JSON 组装，轻量路径）────
+    if output_format == "markdown":
+        return _webpage_reader_markdown(url, max_chars)
+
+    # ── JSON 格式默认路径 ──────────────────────────────
     result = PageMetadata(url=url)
 
     if not url or not url.startswith(("http://", "https://")):
@@ -100,22 +113,19 @@ def _webpage_reader(url: str, max_chars: int = 5000) -> str:
         result.error = "缺少依赖 beautifulsoup4，请执行 pip install beautifulsoup4"
         return to_json(result)
 
-    # ── 1. 发起 HTTP 请求 ──────────────────────────────
+    # ── 1. 发起 HTTP 请求（通过安全客户端）─────────────
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            resp = client.get(url, headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-            })
-            resp.raise_for_status()
+        from tools.security import SafeHttpxClient, SecurityConfig, UrlValidationError
+        client = SafeHttpxClient(SecurityConfig.from_env())
+        resp = client.get(url, _tool_name="webpage_reader")
+    except UrlValidationError as e:
+        result.error = f"URL 被安全策略拦截：{e}"
+        return to_json(result)
     except httpx.HTTPStatusError as e:
         result.error = f"HTTP 错误：{e.response.status_code} {e.response.reason_phrase}"
         return to_json(result)
     except httpx.TimeoutException:
-        result.error = "请求超时（15秒），目标网站响应过慢"
+        result.error = "请求超时，目标网站响应过慢"
         return to_json(result)
     except httpx.RequestError as e:
         result.error = f"请求失败：{e}"
@@ -181,12 +191,36 @@ def _webpage_reader(url: str, max_chars: int = 5000) -> str:
     return to_json(result)
 
 
+def _webpage_reader_markdown(url: str, max_chars: int = 5000) -> str:
+    """轻量路径：抓取 URL 并转为 markdown 文本（等效原 web_fetch）。"""
+    try:
+        import httpx
+        from markdownify import markdownify as md
+    except ImportError:
+        return "[错误] 缺少依赖 markdownify，请执行 pip install markdownify"
+
+    try:
+        from tools.security import SafeHttpxClient, SecurityConfig, UrlValidationError
+        client = SafeHttpxClient(SecurityConfig.from_env())
+        resp = client.get(url, _tool_name="webpage_reader")
+    except UrlValidationError as e:
+        return f"[安全层] URL 被安全策略拦截：{e}"
+    except httpx.RequestError as e:
+        return f"[网络错误] {e}"
+
+    text = md(resp.text)
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n[... 内容已截断 ...]"
+    return text
+
+
 # ── 构造 Tool 实例 ────────────────────────────────────────
 webpage_reader_tool = Tool(
     name="webpage_reader",
     description=(
-        "抓取指定 URL 的网页内容，提取标题、正文、作者、发布日期、来源域名等结构化元信息。"
-        "返回 JSON 格式的元数据，包含清理后的纯文本正文。"
+        "抓取指定 URL 的网页内容。支持两种输出格式（由 output_format 参数指定）：\n"
+        "- json（默认）：返回结构化 JSON，包含标题、作者、发布日期、域名、清理后的纯文本正文\n"
+        "- markdown：返回 markdown 纯文本（适合快速阅读或后续处理）"
     ),
     parameters={
         "type": "object",
@@ -197,8 +231,14 @@ webpage_reader_tool = Tool(
             },
             "max_chars": {
                 "type": "integer",
-                "description": "正文最大字符数（默认 5000，超长页面将截断",
+                "description": "正文最大字符数（默认 5000，超长页面将截断）",
                 "default": 5000,
+            },
+            "output_format": {
+                "type": "string",
+                "enum": ["json", "markdown"],
+                "description": "输出格式：json（结构化元数据，默认）或 markdown（纯文本）",
+                "default": "json",
             },
         },
         "required": ["url"],

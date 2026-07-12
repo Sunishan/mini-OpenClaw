@@ -152,14 +152,17 @@ class AgentLoop:
         system_prompt: str,
         max_turns: int = 20,
         auto_approve: bool = False,
+        interactive_mode: bool = False,
     ):
         self.backend = backend
         self.registry = registry
         self.system_prompt = system_prompt
         self.max_turns = max_turns
         self.auto_approve = auto_approve
+        self.interactive_mode = interactive_mode
         self.messages: list[dict[str, Any]] = []   # 跨轮对话的消息历史
         self._history_loaded = False               # 防止重复加载
+        self._trusted_domains: set[str] = set()    # 交互式确认中信任的域名
 
     def run(self, user_task: str) -> str:
         """单次执行：自动加载历史消息，实现跨进程续聊。
@@ -211,10 +214,66 @@ class AgentLoop:
         """清空对话历史（内存 + 文件）。"""
         self.messages = []
         self._history_loaded = False
+        self._trusted_domains.clear()
         try:
             HISTORY_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+
+    def _confirm_tool(self, name: str, args: dict) -> bool:
+        """交互式确认：用户实时决定是否放行工具调用。
+
+        支持 'a' = always allow this domain（加入信任列表）。
+        """
+        from urllib.parse import urlparse
+
+        url = args.get("url", "")
+        domain = urlparse(url).hostname.lower() if url else ""
+
+        # 检查域名是否已信任
+        if domain and domain in self._trusted_domains:
+            return True
+
+        # 构建提示信息
+        lines = [f"[确认] 工具「{name}」请求执行"]
+        if url:
+            lines.append(f"  URL: {url}")
+        if domain:
+            lines.append(f"  域名: {domain}")
+        prompt_text = "\n".join(lines)
+
+        # 根据是否安装 rich 选择提示方式
+        if console is not None:
+            console.print(f"[yellow]{prompt_text}[/yellow]")
+            choices = "(y/N"
+            if domain:
+                choices += "/a=信任此域名不再询问"
+            choices += ") "
+            try:
+                answer = console.input(f"[bold]是否允许？{choices}[/bold]").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                return False
+        else:
+            print(prompt_text)
+            choices = "(y/N"
+            if domain:
+                choices += "/a=trust domain"
+            choices += ") "
+            try:
+                answer = input(f"是否允许？{choices}").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                return False
+
+        if answer == "a" and domain:
+            self._trusted_domains.add(domain)
+            if console is not None:
+                console.print(f"[dim]域名 {domain} 已加入信任列表，本次会话不再询问[/dim]")
+            else:
+                print(f"[info] 域名 {domain} 已加入信任列表，本次会话不再询问")
+            return True
+        if answer in ("y", "yes"):
+            return True
+        return False
 
     def _execute(self) -> str:
         """ReAct 主循环：从当前 messages 开始执行，返回最终答复。"""
@@ -249,11 +308,20 @@ class AgentLoop:
                 args_str = ", ".join(f"{k}={_preview(v, 120)}" for k, v in args.items())
 
                 verdict = permissions.check(name, args, Path.cwd())
+                tool_blocked = verdict == "deny"
+
                 if verdict == "deny":
                     obs = "[权限层] 拒绝：越界写入 / 危险操作"
                 elif verdict == "confirm" and not self.auto_approve:
-                    obs = f"[权限层] 需确认：{name}({args}) —— 已拦截（演示：默认不放行）"
-                else:
+                    if self.interactive_mode:
+                        allowed = self._confirm_tool(name, args)
+                        if not allowed:
+                            obs = f"[权限层] 用户拒绝：{name}({args})"
+                            tool_blocked = True
+                    else:
+                        obs = f"[权限层] 需确认：{name}({args}) —— 已拦截（非交互模式，默认不放行）"
+                        tool_blocked = True
+                if not tool_blocked:
                     tool = self.registry.get(name)
                     if tool is None:
                         obs = f"错误：未知工具 {name}"
@@ -262,9 +330,6 @@ class AgentLoop:
                             obs = tool.run(**args)
                         except Exception as e:  # noqa: BLE001
                             obs = f"工具 {name} 执行出错：{e}"
-
-                if self.registry.get(name) is None and verdict != "deny":
-                    obs = f"错误：未知工具 {name}"
 
                 rows.append((str(i + 1), name, args_str, _preview(obs, 500)))
                 self.messages.append({

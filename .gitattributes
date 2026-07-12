@@ -1,0 +1,9 @@
+# 强制 shell 脚本始终使用 LF 换行（Linux 容器需要）
+*.sh     text eol=lf
+*.bash   text eol=lf
+
+# Python 也推荐 LF
+*.py     text eol=lf
+
+# 其余文本文件跟随 Git 默认
+*        text=auto

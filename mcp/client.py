@@ -21,6 +21,15 @@ from typing import Any
 
 from tools.base import Tool, ToolRegistry
 
+# MCP 工具中含 URL 参数的需要先过安全验证再转发
+# 防止通过浏览器访问内网（SSRF 防护）
+NAVIGATION_TOOLS = frozenset({
+    "browser_navigate",
+    "browser_navigate_to",
+    "firecrawl_scrape",
+    "firecrawl_crawl",
+})
+
 
 class MCPClient:
     def __init__(
@@ -146,7 +155,15 @@ class MCPClient:
 
 
 def register_mcp_tools(registry: ToolRegistry, client: MCPClient) -> None:
-    """把一个 MCP server 的工具包装成内置 Tool 并注册，实现透明合并。"""
+    """把一个 MCP server 的工具包装成内置 Tool 并注册，实现透明合并。
+
+    对导航/爬取类 MCP 工具，在转发到 MCP server 前先过安全 URL 验证，
+    防止通过浏览器访问内网地址（SSRF 防护）。
+    """
+    from tools.security import UrlValidator, SecurityConfig, UrlValidationError
+
+    validator = UrlValidator(SecurityConfig.from_env())
+
     for spec in client.list_tools():
         name = spec["name"]
         description = spec.get("description", "")
@@ -155,9 +172,21 @@ def register_mcp_tools(registry: ToolRegistry, client: MCPClient) -> None:
                 "\n注意：Firecrawl 免费额度有限；仅在低成本抓取失败或确需目标页正文时使用，"
                 "避免抓取重复页面、转载页或普通证据页。"
             )
+
+        # 对含 URL 参数的导航工具，转发前先过验证
+        def _make_run(mcp_name: str, mcp_client: MCPClient):
+            def _run(**kw: Any) -> str:
+                if mcp_name in NAVIGATION_TOOLS and "url" in kw:
+                    try:
+                        validator.validate(kw["url"])
+                    except UrlValidationError as e:
+                        return f"[安全层] URL 被安全策略拦截：{e}"
+                return mcp_client.call_tool(mcp_name, kw)
+            return _run
+
         registry.register(Tool(
             name=f"mcp__{name}",            # 命名空间避免和内置工具撞名
             description=description,
             parameters=spec.get("inputSchema", {"type": "object", "properties": {}}),
-            run=lambda _n=name, **kw: client.call_tool(_n, kw),
+            run=_make_run(name, client),
         ))
