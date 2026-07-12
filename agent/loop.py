@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import signal
 from pathlib import Path
 from typing import Any
 
@@ -177,6 +178,24 @@ class AgentLoop:
         self._history_loaded = False               # 防止重复加载
         self._trusted_domains: set[str] = set()    # 交互式确认中信任的域名
         self._user_allowed_urls: set[str] = set()  # 用户显式提供且通过安全检查的 URL
+        self._paused = False                       # Ctrl+Z 暂停标志
+        self._setup_signal_handler()
+
+    def _setup_signal_handler(self) -> None:
+        """注册 Ctrl+Z (SIGTSTP) 信号处理器，用于暂停/恢复。"""
+        try:
+            signal.signal(signal.SIGTSTP, self._handle_pause_resume)
+        except (ValueError, OSError):
+            pass  # 非主线程或信号不支持时静默跳过
+
+    def _handle_pause_resume(self, signum: int, frame: object) -> None:
+        """Ctrl+Z 信号处理：切换暂停/恢复。"""
+        if self._paused:
+            self._paused = False
+            _print_warning("已恢复执行")
+        else:
+            self._paused = True
+            _print_warning("已暂停（按 Ctrl+Z 恢复）")
 
     def _record_user_urls(self, text: str) -> None:
         """Remember safe URLs that appeared explicitly in user input."""
@@ -222,13 +241,18 @@ class AgentLoop:
         """多轮对话：保留历史消息，追加用户输入后继续执行。
 
         首次调用会自动插入 system prompt。
+        支持 Ctrl+C 中断当前执行。
         """
         _print_task(user_input)
         self._record_user_urls(user_input)
         if not self.messages:
             self.messages = [{"role": "system", "content": self.system_prompt}]
         self.messages.append({"role": "user", "content": user_input})
-        result = self._execute()
+        try:
+            result = self._execute()
+        except KeyboardInterrupt:
+            _print_warning("用户按 Ctrl+C 中断，当前任务已停止")
+            result = "[已停止] 用户中断了当前任务"
 
         # 执行完后保存历史（交互模式也持久化）
         _save_history(self.messages)
@@ -324,13 +348,26 @@ class AgentLoop:
         return False
 
     def _execute(self) -> str:
-        """ReAct 主循环：从当前 messages 开始执行，返回最终答复。"""
+        """ReAct 主循环：从当前 messages 开始执行，返回最终答复。
+
+        Ctrl+C  中断执行
+        Ctrl+Z  暂停 / 恢复执行
+        """
+        import time as _time
         if not self.messages:
             return ""
 
         for turn in range(self.max_turns):
+            # ── 暂停等待 ──
+            while self._paused:
+                _time.sleep(0.3)
+
             _print_turn(turn + 1, self.max_turns, len(self.messages))
-            assistant = _backend_chat(self.backend, self.messages, self.registry.schemas())
+            try:
+                assistant = _backend_chat(self.backend, self.messages, self.registry.schemas())
+            except KeyboardInterrupt:
+                _print_warning("LLM 调用被 Ctrl+C 中断")
+                return "[已停止] 用户中断了 LLM 调用"
             self.messages.append({
                 "role": "assistant",
                 "content": assistant.get("content", ""),
