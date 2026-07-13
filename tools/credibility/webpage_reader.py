@@ -80,6 +80,16 @@ def _extract_meta(soup: "BeautifulSoup", name: str) -> str:
     return ""
 
 
+def _extract_visible_source(soup: "BeautifulSoup") -> str:
+    """Extract visible news source text such as '来源：新华社'."""
+    text = soup.get_text(separator=" ", strip=True)
+    match = re.search(r"(?:来源|出处)[:：]\s*([^\s　|｜]{2,40})", text)
+    if not match:
+        return ""
+    source = match.group(1).strip()
+    return source.strip("，。；;、")
+
+
 def _webpage_reader(url: str, max_chars: int = 5000,
                     output_format: str = "json") -> str:
     """核心函数：抓取网页并提取内容。
@@ -161,6 +171,17 @@ def _webpage_reader(url: str, max_chars: int = 5000,
         result.author = (
             _extract_meta(soup, "author")
             or _extract_meta(soup, "article:author")
+            or ""
+        )
+
+        # 来源 / 发布机构
+        result.source = (
+            _extract_meta(soup, "source")
+            or _extract_meta(soup, "publisher")
+            or _extract_meta(soup, "article:publisher")
+            or _extract_meta(soup, "og:site_name")
+            or _extract_meta(soup, "application-name")
+            or _extract_visible_source(soup)
             or ""
         )
 

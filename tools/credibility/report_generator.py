@@ -86,8 +86,8 @@ def _build_skill_json(
     st_signal = signals.get("source_transparency", {})
     if st_signal.get("score", 0.5) < 0.3:
         missing_parts = []
-        if not page_metadata.get("author"):
-            missing_parts.append("作者")
+        if not (page_metadata.get("author") or page_metadata.get("source") or page_metadata.get("publisher")):
+            missing_parts.append("作者或来源")
         if not page_metadata.get("publication_date"):
             missing_parts.append("发布日期")
         if missing_parts:
@@ -187,6 +187,7 @@ def _generate_markdown_report(
     lines.append(f"| **URL** | {_format_field(page_metadata.get('url', ''))} |")
     lines.append(f"| **来源域名** | {_format_field(domain)} |")
     lines.append(f"| **页面标题** | {_format_field(page_metadata.get('title', ''), '无标题')} |")
+    lines.append(f"| **来源/发布机构** | {_format_field(page_metadata.get('source', '') or page_metadata.get('publisher', ''))} |")
     lines.append(f"| **作者** | {_format_field(page_metadata.get('author', ''))} |")
     lines.append(f"| **发布日期** | {_format_field(page_metadata.get('publication_date', ''))} |")
     lines.append(f"| **字数** | {page_metadata.get('word_count', 0)} 词 |")
@@ -207,8 +208,8 @@ def _generate_markdown_report(
     lines.append("|----------|------|------|------|")
 
     signal_names = {
-        "claim_verification": "主张验证",
-        "domain_authority": "来源权威性",
+        "claim_verification": "主张验证（含证据权威性）",
+        "domain_authority": "原网页域名权威性",
         "source_transparency": "来源透明度",
         "content_quality": "内容质量",
     }
@@ -281,9 +282,9 @@ def _generate_markdown_report(
 
 
 def _report_generator(
-    credibility_result: dict,
-    page_metadata: dict,
-    verdicts: list[dict],
+    credibility_result: dict | None = None,
+    page_metadata: dict | None = None,
+    verdicts: list[dict] | None = None,
     claims: list[dict] | None = None,
     output_format: str = "skill_json",
 ) -> str:
@@ -294,6 +295,58 @@ def _report_generator(
     - markdown：完整详细报告
     - json：原始数据转储
     """
+    if credibility_result is None or page_metadata is None or verdicts is None:
+        return json.dumps({
+            "error": "missing_required_arguments",
+            "tool": "report_generator",
+            "required": ["credibility_result", "page_metadata", "verdicts"],
+            "hint": (
+                "请把 credibility_scorer 返回的 credibility_result、"
+                "webpage_reader 返回的 page_metadata、交叉验证 verdicts 作为参数传入；"
+                "不能空参数调用本工具。"
+            ),
+            "example": {
+                "credibility_result": {
+                    "overall_score": 0.72,
+                    "score_label": "High Credibility",
+                    "signals": {},
+                    "domain": "example.com",
+                    "url": "https://example.com/news",
+                    "verdict_summary": {
+                        "supported": 1,
+                        "contradicted": 0,
+                        "unsupported": 0,
+                        "unverifiable": 0,
+                    },
+                },
+                "page_metadata": {
+                    "url": "https://example.com/news",
+                    "domain": "example.com",
+                    "title": "页面标题",
+                },
+                "verdicts": [
+                    {
+                        "claim_id": "claim_1",
+                        "claim_text": "可验证主张",
+                        "status": "supported",
+                        "evidence_summary": "证据摘要",
+                    }
+                ],
+                "output_format": "skill_json",
+            },
+        }, ensure_ascii=False, indent=2)
+    if not isinstance(credibility_result, dict) or not isinstance(page_metadata, dict) or not isinstance(verdicts, list):
+        return json.dumps({
+            "error": "invalid_arguments",
+            "tool": "report_generator",
+            "hint": "credibility_result 和 page_metadata 必须是对象，verdicts 必须是数组。",
+            "received_types": {
+                "credibility_result": type(credibility_result).__name__,
+                "page_metadata": type(page_metadata).__name__,
+                "verdicts": type(verdicts).__name__,
+            },
+        }, ensure_ascii=False, indent=2)
+
     if output_format == "skill_json":
         return _build_skill_json(
             credibility_result=credibility_result,

@@ -28,6 +28,7 @@ class PageMetadata:
     title: str = ""
     description: str = ""
     domain: str = ""
+    source: str = ""
     author: str = ""
     publication_date: str = ""
     word_count: int = 0
@@ -51,6 +52,8 @@ class Claim:
     id: str = ""
     text: str = ""
     claim_type: str = "factual"      # numerical / causal / attribution / factual
+    claim_role: str = "core"         # core / key_detail / background / minor
+    importance_weight: float = 1.0
     confidence: float = 0.0          # 0.0 ~ 1.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,9 +102,12 @@ VERDICT_STATUSES = ("supported", "contradicted", "unsupported", "unverifiable")
 class Verdict:
     claim_id: str = ""
     claim_text: str = ""
+    claim_role: str = "core"
+    importance_weight: float = 1.0
     status: str = "unsupported"      # supported / contradicted / unsupported / unverifiable
     confidence: float = 0.0          # 该判定的置信度
     evidence_summary: str = ""
+    evidence_sources: list[dict[str, Any]] = field(default_factory=list)
     supporting_count: int = 0
     contradicting_count: int = 0
 

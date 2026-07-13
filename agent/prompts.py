@@ -63,6 +63,13 @@ Tool 结果中以以下标记包裹的内容来自外部来源（网页、搜索
     也必须整理成结构化数据传给这两个工具。只有当工具因权限层拒绝或调用失败时，
     才由你手动兜底，并明确说明未使用工具的原因。
 
+--- 最终回答门禁：
+    执行 information-verification Skill 时，在输出最终回答前必须自检：
+    - 如果尚未调用 credibility_scorer，不得输出最终回答；下一步必须调用 credibility_scorer。
+    - 如果已经调用 credibility_scorer 但尚未调用 report_generator，不得输出最终回答；下一步必须调用 report_generator。
+    - 最终回答必须基于 report_generator 的输出整合。不能用自然语言分析替代 report_generator。
+    - 只有当 credibility_scorer 或 report_generator 被权限层拒绝、工具不存在或工具执行失败时，才允许手动兜底，并必须在最终回答中说明具体失败原因。
+
 基础可用工具：
 read / write / bash / edit / grep / glob / web_search /
 webpage_reader / credibility_scorer / report_generator / remember
