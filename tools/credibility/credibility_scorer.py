@@ -1,7 +1,7 @@
 """工具5：可信度评分工具。
 
 综合网页信号、来源信息和主张验证结果，输出可信度分数(0~1)和等级。
-使用五维度加权评分模型。
+使用四维度加权评分模型：主张验证60%、来源透明度20%、域名权威10%、内容质量10%。
 """
 from __future__ import annotations
 import json
@@ -647,7 +647,7 @@ def _credibility_scorer(
             },
         })
 
-    # 信号 1：主张验证（权重 50%，内部已按证据相关性和证据来源权威性加权）
+    # 信号 1：主张验证（权重 60%，内部已按证据相关性和证据来源权威性加权）
     cv_score, cv_details = _score_claim_verification(verdicts)
     n_claims = len(verdicts)
     n_supported = sum(1 for v in verdicts if v.get("status") == "supported")
@@ -655,7 +655,7 @@ def _credibility_scorer(
     n_unsupported = sum(1 for v in verdicts if v.get("status") == "unsupported")
     n_unverifiable = sum(1 for v in verdicts if v.get("status") == "unverifiable")
     cv_signal = SignalScore(
-        weight=0.50,
+        weight=0.60,
         score=cv_score,
         details=(
             f"共 {n_claims} 条主张：{n_supported} 条支持, "
@@ -664,24 +664,24 @@ def _credibility_scorer(
         ),
     )
 
-    # 信号 2：原网页域名权威性（权重 20%）
+    # 信号 2：原网页域名权威性（权重 10%）
     domain = page_metadata.get("domain", "")
     da_score = _get_domain_authority(domain)
     da_signal = SignalScore(
-        weight=0.20,
+        weight=0.10,
         score=da_score,
         details=f"域名 {domain} 的权威性评分：{da_score:.2f}",
     )
 
-    # 信号 3：来源透明度（权重 15%）
+    # 信号 3：来源透明度（权重 20%）
     st_score = _score_transparency(page_metadata)
     st_signal = SignalScore(
-        weight=0.15,
+        weight=0.20,
         score=st_score,
         details=f"来源透明度评分：{st_score:.2f}",
     )
 
-    # 信号 4：内容质量（权重 15%）
+    # 信号 4：内容质量（权重 10%）
     assessed_content_quality = _score_content_quality_from_assessment(
         page_metadata.get("content_quality_assessment")
     )
@@ -690,7 +690,7 @@ def _credibility_scorer(
     else:
         cq_score, cq_details = _score_content_quality(page_metadata)
     cq_signal = SignalScore(
-        weight=0.15,
+        weight=0.10,
         score=cq_score,
         details=cq_details,
     )
