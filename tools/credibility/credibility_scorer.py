@@ -391,37 +391,149 @@ def _score_transparency(meta: dict) -> float:
     return round(score, 2)
 
 
-def _score_content_quality(meta: dict) -> float:
-    """评估内容质量。"""
-    word_count = meta.get("word_count", 0) or 0
+def _count_pattern_terms(text: str, patterns: list[str]) -> int:
+    return sum(len(re.findall(pattern, text, flags=re.IGNORECASE)) for pattern in patterns)
+
+
+def _split_sentences(text: str) -> list[str]:
+    sentences = re.split(r"(?<=[。！？!?；;])\s*", text)
+    return [sentence.strip() for sentence in sentences if sentence.strip()]
+
+
+def _is_factcheck_contrast(context: str) -> bool:
+    """Detect normal fact-check framing, not author self-contradiction."""
+    rumor_or_claim = re.search(r"网传|传言|声称|宣称|截图称|消息称|有消息称", context)
+    verification = re.search(
+        r"记者|查询|检索|核实|暂未(?:看到|发现|确认)|未见|未附|未提供|官方(?:回应|辟谣|否认)",
+        context,
+    )
+    contrast = re.search(r"但|但是|不过|然而|截至|目前", context)
+    return bool(rumor_or_claim and verification and contrast)
+
+
+def _count_nearby_contradictions(text: str, contradiction_pairs: list[tuple[str, str]]) -> int:
+    sentences = _split_sentences(text)
+    hits = 0
+    for positive, negative in contradiction_pairs:
+        found = False
+        for index, sentence in enumerate(sentences):
+            contexts = [sentence]
+            if index + 1 < len(sentences):
+                contexts.append(sentence + " " + sentences[index + 1])
+            for context in contexts:
+                if re.search(positive, context) and re.search(negative, context):
+                    if _is_factcheck_contrast(context):
+                        continue
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            hits += 1
+    return hits
+
+
+def _score_content_quality(meta: dict) -> tuple[float, str]:
+    """评估内容质量：重点检查内部矛盾、逻辑风险和模糊表述。"""
     text_content = meta.get("text_content", "") or ""
+    title = meta.get("title", "") or ""
+    text = f"{title}\n{text_content}".strip()
 
-    # 字数评分（权重 0.5）
-    length_score = min(word_count / 1000, 1.0)
+    if not text:
+        return 0.20, "正文为空，无法评估内部一致性"
 
-    # 结构评分（权重 0.5）：检查是否有段落、列表等结构
-    structure_score = 0.0
-    if text_content:
-        # 有段落（多个换行分隔的段落）
-        paragraphs = [p.strip() for p in text_content.split("\n\n") if p.strip()]
-        if len(paragraphs) >= 3:
-            structure_score += 0.3
-        elif len(paragraphs) >= 1:
-            structure_score += 0.1
+    cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    total_chars = max(len(text), cjk_chars, 1)
+    score = 1.0
+    details: list[str] = []
 
-        # 有列表项
-        if re.search(r"^[-*]\s", text_content, re.MULTILINE):
-            structure_score += 0.2
-        if re.search(r"^\d+\.\s", text_content, re.MULTILINE):
-            structure_score += 0.2
+    contradiction_pairs = [
+        (r"已(?:经)?(?:确认|证实)|确认(?:了)?", r"未(?:经)?证实|尚未证实|无法证实|暂未确认"),
+        (r"官方(?:公告|通报|发布|确认)|正式(?:公告|发布)", r"暂无.*(?:公告|通报)|未见.*(?:公告|通报)|没有.*(?:公告|通报)"),
+        (r"已(?:经)?(?:完成|发生|造成)|已于", r"预计|或将|可能会|有望"),
+        (r"全部|所有|全面|全市|全国", r"部分|个别|局部|试点|少数"),
+        (r"无影响|不影响|无需担心|无需恐慌", r"存在风险|可能影响|担心|异常|隐患"),
+    ]
+    contradiction_hits = _count_nearby_contradictions(text, contradiction_pairs)
+    if contradiction_hits:
+        penalty = min(0.30, contradiction_hits * 0.12)
+        score -= penalty
+        details.append(f"检测到 {contradiction_hits} 类近邻内部矛盾/逻辑冲突，扣 {penalty:.2f}")
 
-        # 有引用或数据
-        if re.search(r"\d+%|\$\d+|\d+\.\d+", text_content):
-            structure_score += 0.15
-        if re.search(r'"', text_content):
-            structure_score += 0.15
+    vague_patterns = [
+        r"网传", r"据传", r"据说", r"传言", r"疑似", r"可能", r"或许", r"或将",
+        r"有消息称", r"知情人士", r"内部人士", r"相关人士", r"未经证实",
+        r"暂未确认", r"不排除", r"大概率", r"基本确定", r"或与.*有关",
+    ]
+    vague_count = _count_pattern_terms(text, vague_patterns)
+    vague_density = vague_count / max(total_chars / 500, 1.0)
+    if vague_density > 2:
+        penalty = min(0.30, (vague_density - 2) * 0.08)
+        score -= penalty
+        details.append(f"模糊/不确定表述密度偏高（{vague_count} 处），扣 {penalty:.2f}")
+    elif vague_count:
+        details.append(f"有少量模糊/不确定表述（{vague_count} 处），未明显扣分")
 
-    return round(length_score * 0.5 + min(structure_score, 0.5), 2)
+    absolute_patterns = [
+        r"绝对", r"百分百", r"100%", r"一定", r"必然", r"肯定", r"实锤",
+        r"坐实", r"彻底", r"完全证实", r"无需核实",
+    ]
+    absolute_count = _count_pattern_terms(text, absolute_patterns)
+    if absolute_count:
+        penalty = min(0.15, absolute_count * 0.04)
+        score -= penalty
+        details.append(f"存在绝对化/过度确定表述（{absolute_count} 处），扣 {penalty:.2f}")
+
+    injection_patterns = [
+        r"忽略.*(?:指令|要求)", r"不要搜索", r"不要质疑", r"直接判定",
+        r"删除.*证据", r"系统指令", r"root-helper",
+    ]
+    injection_count = _count_pattern_terms(text, injection_patterns)
+    if injection_count:
+        penalty = min(0.45, injection_count * 0.15)
+        score -= penalty
+        details.append(f"检测到疑似提示注入/诱导性指令（{injection_count} 处），扣 {penalty:.2f}")
+
+    if total_chars < 80:
+        score -= 0.10
+        details.append("正文过短，内部一致性证据不足，扣 0.10")
+
+    final_score = round(max(0.0, min(score, 1.0)), 2)
+    if not details:
+        details.append("未发现明显内部矛盾、逻辑冲突或高密度模糊表述")
+    return final_score, "；".join(details)
+
+
+def _score_content_quality_from_assessment(assessment: object) -> tuple[float, str] | None:
+    """Use model-provided structured content quality assessment when valid."""
+    if not isinstance(assessment, dict):
+        return None
+    if "score" not in assessment:
+        return None
+
+    score = _clamp_score(assessment.get("score"), default=0.5)
+    details: list[str] = ["使用大模型结构化内容质量评估"]
+
+    rationale = str(assessment.get("rationale") or "").strip()
+    if rationale:
+        details.append(rationale[:180])
+
+    issue_fields = [
+        ("internal_contradictions", "内部矛盾"),
+        ("logic_issues", "逻辑问题"),
+        ("vague_language_examples", "模糊表述"),
+        ("prompt_injection_signals", "提示注入风险"),
+    ]
+    for field, label in issue_fields:
+        value = assessment.get(field)
+        if isinstance(value, list) and value:
+            details.append(f"{label} {len(value)} 处")
+
+    vague_level = str(assessment.get("vague_language_level") or "").strip()
+    if vague_level:
+        details.append(f"模糊表述等级：{vague_level}")
+
+    return round(score, 2), "；".join(details)
 
 
 def _credibility_scorer(
@@ -522,11 +634,17 @@ def _credibility_scorer(
     )
 
     # 信号 4：内容质量（权重 15%）
-    cq_score = _score_content_quality(page_metadata)
+    assessed_content_quality = _score_content_quality_from_assessment(
+        page_metadata.get("content_quality_assessment")
+    )
+    if assessed_content_quality is not None:
+        cq_score, cq_details = assessed_content_quality
+    else:
+        cq_score, cq_details = _score_content_quality(page_metadata)
     cq_signal = SignalScore(
         weight=0.15,
         score=cq_score,
-        details=f"内容质量评分：{cq_score:.2f}",
+        details=cq_details,
     )
 
     # 综合计算
@@ -637,6 +755,31 @@ credibility_scorer_tool = Tool(
                     "publication_date": {"type": "string"},
                     "word_count": {"type": "integer"},
                     "text_content": {"type": "string"},
+                    "content_quality_assessment": {
+                        "type": "object",
+                        "description": "可选。模型按固定 rubric 对原文内容质量做出的结构化评估；缺失时 scorer 使用规则兜底",
+                        "properties": {
+                            "score": {"type": "number"},
+                            "internal_contradictions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "logic_issues": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "vague_language_level": {"type": "string"},
+                            "vague_language_examples": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "prompt_injection_signals": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "rationale": {"type": "string"},
+                        },
+                    },
                 },
             },
         },
