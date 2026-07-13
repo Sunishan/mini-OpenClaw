@@ -1,16 +1,130 @@
 """工具6：报告生成工具。
 
-综合所有评估结果，生成面向普通用户的 Markdown 可信度解释报告。
-支持 markdown 和 json 两种输出格式。
+综合所有评估结果，生成报告。
+支持三种输出格式：
+  skill_json（默认）：符合 SKILL.md 要求的最终 JSON 结构
+  markdown：详细报告，供用户追问时使用
+  json：原始数据转储
 """
 from __future__ import annotations
 import json
 
 from tools.base import Tool
 
+# ── 中文标签映射 ──────────────────────────────────────────
+_CREDIBILITY_LABEL_MAP = {
+    "High Credibility": "高",
+    "Medium Credibility": "中",
+    "Low Credibility": "低",
+}
+_VERDICT_LABEL_MAP = {
+    "supported": "高",
+    "contradicted": "低",
+    "unsupported": "中",
+    "unverifiable": "中",
+}
+
+
+def _build_skill_json(
+    credibility_result: dict,
+    page_metadata: dict,
+    verdicts: list[dict],
+    claims: list[dict] | None = None,
+) -> str:
+    """生成符合 SKILL.md 最终输出要求的 JSON。"""
+    overall = credibility_result.get("overall_score", 0.0)
+    label = credibility_result.get("score_label", "Medium Credibility")
+    signals = credibility_result.get("signals", {})
+    summary = credibility_result.get("verdict_summary", {})
+    domain = credibility_result.get("domain", "")
+    url = page_metadata.get("url", "")
+    title = page_metadata.get("title", "")
+
+    # ── 事件描述 ────────────────────────────────────────
+    event_title = title or domain or url or "未知来源"
+
+    # ── 有效信息 ────────────────────────────────────────
+    valid_items = []
+    for i, v in enumerate(verdicts, 1):
+        cid = v.get("claim_id", f"claim_{i}")
+        ctext = v.get("claim_text", "")
+        status = v.get("status", "unsupported")
+        ev_summary = v.get("evidence_summary", "")
+
+        # 被反驳的主张进入可疑点，不进入有效信息
+        if status == "contradicted":
+            continue
+
+        cred = _VERDICT_LABEL_MAP.get(status, "中")
+        reason = ev_summary[:200] if ev_summary else "该主张当前无足够证据支撑"
+        if status == "supported":
+            reason = f"有独立证据支持。{ev_summary[:150]}"
+        elif status == "unverifiable":
+            reason = f"有相关信息但无法确认。{ev_summary[:150]}"
+
+        valid_items.append({
+            "编号": f"信息{i}",
+            "内容": ctext[:200],
+            "可信度": cred,
+            "理由": reason[:200],
+        })
+
+    # ── 可疑点 ──────────────────────────────────────────
+    suspicious = []
+    # 被反驳的主张
+    for v in verdicts:
+        if v.get("status") == "contradicted":
+            ctext = v.get("claim_text", "")
+            suspicious.append(f"「{ctext[:100]}」与现有证据矛盾")
+
+    # 域名权威性低
+    da_signal = signals.get("domain_authority", {})
+    if da_signal.get("score", 0.5) < 0.4:
+        suspicious.append(f"来源域名 {domain} 权威性不足")
+
+    # 来源透明度低
+    st_signal = signals.get("source_transparency", {})
+    if st_signal.get("score", 0.5) < 0.3:
+        missing_parts = []
+        if not page_metadata.get("author"):
+            missing_parts.append("作者")
+        if not page_metadata.get("publication_date"):
+            missing_parts.append("发布日期")
+        if missing_parts:
+            suspicious.append(f"页面缺乏{', '.join(missing_parts)}等关键元信息")
+
+    # ── 事件可信度 ──────────────────────────────────────
+    cn_cred = _CREDIBILITY_LABEL_MAP.get(label, "中")
+
+    # ── 事件真相还原 ────────────────────────────────────
+    supported_claims = [v.get("claim_text", "") for v in verdicts if v.get("status") == "supported"]
+    contradicted_claims = [v.get("claim_text", "") for v in verdicts if v.get("status") == "contradicted"]
+    unverifiable_claims = [v.get("claim_text", "") for v in verdicts if v.get("status") in ("unverifiable", "unsupported")]
+
+    parts = []
+    if supported_claims:
+        parts.append(f"有证据支持的主张：{'；'.join(c[:80] for c in supported_claims)}")
+    if contradicted_claims:
+        parts.append(f"被证据反驳的主张：{'；'.join(c[:80] for c in contradicted_claims)}")
+    if unverifiable_claims:
+        parts.append(f"暂时无法验证的主张：{'；'.join(c[:80] for c in unverifiable_claims)}")
+
+    truth = "；".join(parts) if parts else "该事件缺乏足够可靠证据，无法做出完整还原。"
+
+    # ── 组装最终 JSON ───────────────────────────────────
+    result = {
+        "事件": event_title[:100],
+        "有效信息": valid_items,
+        "剔除信息": [],  # 由模型在最终整合时补充
+        "可疑点": suspicious,
+        "事件可信度": cn_cred,
+        "事件真相还原": truth[:500],
+    }
+
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
 
 def _score_to_bar(score: float, width: int = 20) -> str:
-    """生成一个简单的进度条字符串。"""
     filled = int(score * width)
     bar = "█" * filled + "░" * (width - filled)
     color = "🟢" if score >= 0.7 else ("🟡" if score >= 0.4 else "🔴")
@@ -18,14 +132,12 @@ def _score_to_bar(score: float, width: int = 20) -> str:
 
 
 def _format_field(value: str, default: str = "未找到") -> str:
-    """格式化字段，空值显示默认文本。"""
     if not value or not value.strip():
         return default
     return value.strip()
 
 
 def _get_recommendation(overall_score: float, score_label: str) -> str:
-    """基于评分生成建议。"""
     if overall_score >= 0.70:
         return (
             "✅ **可信度高**：该来源表现出了较高的可信度指标。"
@@ -54,7 +166,7 @@ def _generate_markdown_report(
     verdicts: list[dict],
     claims: list[dict] | None = None,
 ) -> str:
-    """生成 Markdown 格式报告。"""
+    """生成 Markdown 格式详细报告。"""
     overall = credibility_result.get("overall_score", 0.0)
     label = credibility_result.get("score_label", "N/A")
     signals = credibility_result.get("signals", {})
@@ -77,7 +189,6 @@ def _generate_markdown_report(
     lines.append(f"| **页面标题** | {_format_field(page_metadata.get('title', ''), '无标题')} |")
     lines.append(f"| **作者** | {_format_field(page_metadata.get('author', ''))} |")
     lines.append(f"| **发布日期** | {_format_field(page_metadata.get('publication_date', ''))} |")
-    lines.append(f"| **说明** | {_format_field(page_metadata.get('description', ''), '无页面描述')} |")
     lines.append(f"| **字数** | {page_metadata.get('word_count', 0)} 词 |")
     lines.append("")
 
@@ -107,7 +218,6 @@ def _generate_markdown_report(
         score = sig.get("score", 0) * 100
         details = sig.get("details", "")
         lines.append(f"| **{display_name}** | {weight:.0f}% | {score:.0f}% | {details[:120]} |")
-
     lines.append("")
 
     # ── 判定汇总 ────────────────────────────────────────
@@ -124,13 +234,11 @@ def _generate_markdown_report(
     # ── 逐条分析 ────────────────────────────────────────
     lines.append("## 🔍 逐条主张分析")
     lines.append("")
-
     if not verdicts:
         lines.append("_未从页面中提取到可验证的主张。_")
         lines.append("")
 
     for i, v in enumerate(verdicts, 1):
-        cid = v.get("claim_id", f"主张 {i}")
         ctext = v.get("claim_text", "")
         status = v.get("status", "unsupported")
         confidence = v.get("confidence", 0.0)
@@ -138,7 +246,6 @@ def _generate_markdown_report(
         support_cnt = v.get("supporting_count", 0)
         contradict_cnt = v.get("contradicting_count", 0)
 
-        # 状态图标
         status_icons = {
             "supported": "✅ 支持",
             "contradicted": "❌ 反驳",
@@ -178,37 +285,47 @@ def _report_generator(
     page_metadata: dict,
     verdicts: list[dict],
     claims: list[dict] | None = None,
-    output_format: str = "markdown",
+    output_format: str = "skill_json",
 ) -> str:
     """核心函数：生成最终报告。
 
-    返回 Markdown 或 JSON 格式的报告字符串。
+    三种输出格式：
+    - skill_json（默认）：SKILL.md 要求的最终 JSON 结构
+    - markdown：完整详细报告
+    - json：原始数据转储
     """
-    if output_format == "json":
-        return json.dumps({
-            "report_type": "credibility_assessment",
-            "credibility_result": credibility_result,
-            "page_metadata": page_metadata,
-            "verdicts": verdicts,
-            "claims": claims or [],
-        }, ensure_ascii=False, indent=2)
+    if output_format == "skill_json":
+        return _build_skill_json(
+            credibility_result=credibility_result,
+            page_metadata=page_metadata,
+            verdicts=verdicts,
+            claims=claims,
+        )
 
-    # 默认返回 Markdown
-    return _generate_markdown_report(
-        credibility_result=credibility_result,
-        page_metadata=page_metadata,
-        verdicts=verdicts,
-        claims=claims,
-    )
+    if output_format == "markdown":
+        return _generate_markdown_report(
+            credibility_result=credibility_result,
+            page_metadata=page_metadata,
+            verdicts=verdicts,
+            claims=claims,
+        )
+
+    # json：原始数据转储
+    return json.dumps({
+        "report_type": "credibility_assessment",
+        "credibility_result": credibility_result,
+        "page_metadata": page_metadata,
+        "verdicts": verdicts,
+        "claims": claims or [],
+    }, ensure_ascii=False, indent=2)
 
 
 # ── 构造 Tool 实例 ────────────────────────────────────────
 report_generator_tool = Tool(
     name="report_generator",
     description=(
-        "综合所有评估结果，生成面向普通用户的最终报告。"
-        "默认输出格式为 Markdown，适合直接展示；也可选择 JSON 格式。"
-        "报告包含页面摘要、可信度评分、信号明细、主张判定分析和使用建议。"
+        "综合所有评估结果生成报告。默认输出 skill_json（符合 SKILL.md 要求的最终 JSON），"
+        "也支持 markdown（详细报告，用户追问时使用）和 json（原始数据转储）。"
     ),
     parameters={
         "type": "object",
@@ -223,17 +340,17 @@ report_generator_tool = Tool(
             },
             "verdicts": {
                 "type": "array",
-                "description": "交叉验证结果中的 verdicts 列表（来自 cross_validator 输出）",
+                "description": "交叉验证结果中的 verdicts 列表",
             },
             "claims": {
                 "type": "array",
-                "description": "提取的主张列表（来自 claim_extractor 输出，可选，用于丰富报告）",
+                "description": "提取的主张列表（可选，用于丰富报告）",
             },
             "output_format": {
                 "type": "string",
-                "enum": ["markdown", "json"],
-                "description": "输出格式：markdown（默认，适合展示）或 json（适合程序处理）",
-                "default": "markdown",
+                "enum": ["skill_json", "markdown", "json"],
+                "description": "skill_json=最终答案JSON(默认), markdown=详细报告(追问时使用), json=原始数据",
+                "default": "skill_json",
             },
         },
         "required": ["credibility_result", "page_metadata", "verdicts"],

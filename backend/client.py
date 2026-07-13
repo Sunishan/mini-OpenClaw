@@ -28,7 +28,7 @@ class DeepSeekBackend:
                  timeout: float = 60.0):
         self.api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
         self.base_url = (base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")).rstrip("/")
-        self.model = model or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        self.model = model or os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
         if not self.api_key:
             raise RuntimeError("缺少 DEEPSEEK_API_KEY 环境变量")
         self._client = httpx.Client(timeout=timeout)
