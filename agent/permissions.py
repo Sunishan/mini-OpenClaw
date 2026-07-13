@@ -14,13 +14,13 @@ READONLY = {
     "read",
     "grep",
     "glob",
+    "authority_sort",
     "credibility_scorer",
     "report_generator",
     "load_skill",
 }
 WRITE = {"write", "edit"}
 EXEC = {"bash"}
-LOW_RISK_NETWORK = {"web_search"}
 EXPLICIT_URL_NETWORK = {
     "webpage_reader",
     "mcp__firecrawl_scrape",
@@ -41,7 +41,6 @@ MEMORY_WRITE = {"remember"}
 # 这些结果在注入 prompt 时会被标记隔离，防止提示注入
 EXTERNAL_SOURCES = {
     "webpage_reader",
-    "web_search",
 }
 
 

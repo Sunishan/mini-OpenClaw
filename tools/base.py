@@ -68,9 +68,9 @@ def build_default_registry() -> ToolRegistry:
     for t in (edit_tool, grep_tool, glob_tool):
         reg.register(t)
 
-    # ── 注册搜索工具 ──────────────────────────────────
-    from .search import web_search_tool
-    reg.register(web_search_tool)
+    # ── 注册权威排序工具 ────────────────────────────────
+    from .authority_sort import authority_sort_tool
+    reg.register(authority_sort_tool)
 
     # ── 注册长期记忆工具 ────────────────────────────────
     from .remember import remember_tool
