@@ -18,6 +18,13 @@ WORKDIR /app
 RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
     && pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
+# ── 安装 locales 并生成 C.UTF-8，确保中文输入/退格不崩溃 ──
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends locales \
+    && sed -i 's/^# *\(C.UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen \
+    && rm -rf /var/lib/apt/lists/*
+
 # System tools:
 # - ripgrep: required by the built-in grep tool
 # - git/openssh-client: useful for deployment-time diagnostics and private package access
