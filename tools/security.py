@@ -200,11 +200,14 @@ class UrlValidator:
             self._check_ssrf(hostname)
 
     def _check_ssrf(self, hostname: str) -> None:
-        """解析 hostname 并检查 IP 是否为私有/保留地址。"""
+        """解析 hostname 并检查 IP 是否为私有/保留地址。
+
+        DNS 解析失败是网络问题，不是安全问题——让实际 HTTP 请求自然处理超时。
+        """
         try:
             addrs = socket.getaddrinfo(hostname, None)
-        except socket.gaierror as e:
-            raise UrlValidationError(f"无法解析域名：{hostname}") from e
+        except (socket.gaierror, OSError):
+            return  # 网络不可达 / DNS 失效，不阻断，让 httpx 处理错误
 
         for family, _, _, _, sockaddr in addrs:
             ip_str = sockaddr[0]

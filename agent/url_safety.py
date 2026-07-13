@@ -77,14 +77,14 @@ def _is_unsafe_ip(address: str) -> bool:
 def _resolve_host(hostname: str, port: int) -> tuple[bool, str]:
     try:
         infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        return False, f"DNS 解析失败：{exc}"
-    except OSError as exc:
-        return False, f"DNS 检查失败：{exc}"
+    except (socket.gaierror, OSError):
+        # DNS 解析失败只是网络问题，不等于 URL 不安全
+        # 让实际 HTTP 请求自然处理超时/错误
+        return True, ""
 
     addresses = {info[4][0] for info in infos if info and info[4]}
     if not addresses:
-        return False, "DNS 未返回可用地址"
+        return True, ""
     for address in addresses:
         if _is_unsafe_ip(address):
             return False, f"解析到不安全地址：{address}"

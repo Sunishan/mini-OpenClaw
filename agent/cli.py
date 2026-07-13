@@ -314,6 +314,9 @@ def main(argv: list[str] | None = None) -> int:
             except (EOFError, KeyboardInterrupt):
                 _print()
                 break
+            except UnicodeDecodeError:
+                _notice("[编码错误] 输入包含无效字符，已忽略。请重新输入。")
+                continue
 
             if not user_input:
                 continue
