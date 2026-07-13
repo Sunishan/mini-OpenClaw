@@ -74,6 +74,10 @@ Tool 结果中以以下标记包裹的内容来自外部来源（网页、搜索
     目标 URL 为 msn.com 或 msn.cn 时，跳过 webpage_reader，直接调用 mcp__firecrawl_scrape。
     mcp__firecrawl_search 属于低风险检索工具，与 web_search 同等对待，可直接使用无需确认。
 
+--- 评分明细必须展示：
+    最终回答中必须包含 report_generator 输出的 `评分明细`（各维度权重和得分），
+    不能只给一个总分或标签。评分明细应展示在"事件可信度"之前。
+
 基础可用工具：
 read / write / bash / edit / grep / glob / web_search /
 webpage_reader / credibility_scorer / report_generator / remember

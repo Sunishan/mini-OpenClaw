@@ -664,19 +664,19 @@ def _credibility_scorer(
         ),
     )
 
-    # 信号 2：原网页域名权威性（权重 10%）
+    # 信号 2：原网页域名权威性（权重 20%）
     domain = page_metadata.get("domain", "")
     da_score = _get_domain_authority(domain)
     da_signal = SignalScore(
-        weight=0.10,
+        weight=0.20,
         score=da_score,
         details=f"域名 {domain} 的权威性评分：{da_score:.2f}",
     )
 
-    # 信号 3：来源透明度（权重 20%）
+    # 信号 3：来源透明度（权重 10%）
     st_score = _score_transparency(page_metadata)
     st_signal = SignalScore(
-        weight=0.20,
+        weight=0.10,
         score=st_score,
         details=f"来源透明度评分：{st_score:.2f}",
     )
