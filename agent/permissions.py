@@ -14,15 +14,13 @@ READONLY = {
     "read",
     "grep",
     "glob",
-    "claim_extractor",
-    "cross_validator",
     "credibility_scorer",
     "report_generator",
     "load_skill",
 }
 WRITE = {"write", "edit"}
 EXEC = {"bash"}
-LOW_RISK_NETWORK = {"web_search", "kb_retriever"}
+LOW_RISK_NETWORK = {"web_search"}
 EXPLICIT_URL_NETWORK = {
     "webpage_reader",
     "mcp__firecrawl_scrape",
@@ -40,7 +38,6 @@ MEMORY_WRITE = {"remember"}
 EXTERNAL_SOURCES = {
     "webpage_reader",
     "web_search",
-    "kb_retriever",
 }
 
 
