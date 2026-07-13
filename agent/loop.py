@@ -183,6 +183,8 @@ class AgentLoop:
 
     def _setup_signal_handler(self) -> None:
         """注册 Ctrl+Z (SIGTSTP) 信号处理器，用于暂停/恢复。"""
+        if not hasattr(signal, "SIGTSTP"):
+            return  # Windows 没有 SIGTSTP
         try:
             signal.signal(signal.SIGTSTP, self._handle_pause_resume)
         except (ValueError, OSError):

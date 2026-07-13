@@ -70,6 +70,10 @@ Tool 结果中以以下标记包裹的内容来自外部来源（网页、搜索
     - 最终回答必须基于 report_generator 的输出整合。不能用自然语言分析替代 report_generator。
     - 只有当 credibility_scorer 或 report_generator 被权限层拒绝、工具不存在或工具执行失败时，才允许手动兜底，并必须在最终回答中说明具体失败原因。
 
+--- MSN 域名（msn.com / msn.cn）的特例规则：
+    目标 URL 为 msn.com 或 msn.cn 时，跳过 webpage_reader，直接调用 mcp__firecrawl_scrape。
+    mcp__firecrawl_search 属于低风险检索工具，与 web_search 同等对待，可直接使用无需确认。
+
 基础可用工具：
 read / write / bash / edit / grep / glob / web_search /
 webpage_reader / credibility_scorer / report_generator / remember

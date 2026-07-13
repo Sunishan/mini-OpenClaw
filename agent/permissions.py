@@ -26,6 +26,10 @@ EXPLICIT_URL_NETWORK = {
     "mcp__firecrawl_scrape",
     "mcp__browser_navigate",
 }
+MCP_LOW_RISK = {
+    "mcp__firecrawl_search",
+    "mcp__firecrawl_search_feedback",
+}
 MCP_READONLY = {
     "mcp__browser_snapshot",
     "mcp__browser_find",
@@ -131,6 +135,9 @@ def check_with_reason(
 
     if tool in MEMORY_WRITE:
         return "confirm", "长期记忆写入需要确认"
+
+    if tool in MCP_LOW_RISK:
+        return "allow", "低风险 MCP 检索工具"
 
     if tool in MCP_READONLY:
         return "allow", "MCP 只读页面状态工具"
