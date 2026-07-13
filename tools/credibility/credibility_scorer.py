@@ -21,19 +21,36 @@ MEDIUM_CREDIBILITY_THRESHOLD = 0.40
 # 已知的高可信域名
 HIGH_AUTHORITY_DOMAINS: set[str] = {
     # 政府
-    ".gov", ".gov.cn", ".gov.uk", ".go.jp",
+    ".gov", ".gov.cn", ".gov.uk", ".gov.au", ".gov.sg", ".gov.in",
+    ".gov.br", ".gov.hk", ".gov.tw", ".go.jp", ".go.kr", ".gouv.fr",
+    ".gc.ca", ".govt.nz", "gov.cn", "canada.ca",
     # 教育
     ".edu", ".edu.cn", ".ac.uk", ".ac.cn",
     # 国际组织
     "who.int", "un.org", "unicef.org", "worldbank.org", "imf.org",
-    "oecd.org", "iea.org", "bloomberg.org",
+    "oecd.org", "iea.org", "bloomberg.org", "wto.org", "ilo.org",
+    "fao.org", "wmo.int", "ipcc.ch", "iaea.org", "unesco.org",
+    "nato.int", "europa.eu", "ec.europa.eu",
     # 权威媒体
     "reuters.com", "ap.org", "apnews.com", "bbc.com", "bbc.co.uk",
-    "npr.org", "economist.com", "nature.com", "science.org",
+    "npr.org", "economist.com", "bloomberg.com", "ft.com", "wsj.com",
+    "nytimes.com", "washingtonpost.com", "theguardian.com",
+    "aljazeera.com", "dw.com", "france24.com", "nikkei.com",
+    "scmp.com", "nature.com", "science.org", "nejm.org",
+    "thelancet.com", "jamanetwork.com", "bmj.com",
     "nationalgeographic.com", "people.com.cn", "xinhuanet.com",
     "news.cn", "cctv.com", "chinanews.com.cn", "chinadaily.com.cn",
+    "caixin.com", "thepaper.cn", "yicai.com",
     # 权威研究机构
     "nasa.gov", "noaa.gov", "nih.gov", "cdc.gov", "nsf.gov",
+    "fda.gov", "clinicaltrials.gov", "ncbi.nlm.nih.gov",
+    "ema.europa.eu", "ecdc.europa.eu",
+    "nhc.gov.cn", "samr.gov.cn", "mfa.gov.cn", "stats.gov.cn",
+    "mot.gov.cn", "mwr.gov.cn", "cma.gov.cn", "mem.gov.cn",
+    "mee.gov.cn", "moe.gov.cn",
+    "sec.gov", "federalreserve.gov", "treasury.gov", "ecb.europa.eu",
+    "bankofengland.co.uk", "bis.org", "pbc.gov.cn", "pboc.gov.cn",
+    "csrc.gov.cn", "nfsa.gov.cn", "safe.gov.cn",
     "stanford.edu", "mit.edu", "harvard.edu", "ox.ac.uk",
     "cam.ac.uk", "tsinghua.edu.cn", "pku.edu.cn",
 }
@@ -53,18 +70,27 @@ def _get_domain_authority(domain: str) -> float:
     if not domain:
         return 0.3  # 无域名信息
 
-    domain_lower = domain.lower()
+    domain_lower = _normalize_domain_value(domain)
+    if not domain_lower:
+        return 0.3
 
     # 精确匹配与子域名匹配
-    for high_domain in HIGH_AUTHORITY_DOMAINS:
+    ordered_high_domains = sorted(
+        HIGH_AUTHORITY_DOMAINS,
+        key=lambda item: (item.startswith("."), -len(item)),
+    )
+    for high_domain in ordered_high_domains:
         if domain_lower == high_domain:
             return 0.9
         if not high_domain.startswith(".") and domain_lower.endswith(f".{high_domain}"):
             return 0.9
-        if high_domain.startswith(".") and domain_lower.endswith(high_domain):
+        if high_domain.startswith(".") and (
+            domain_lower == high_domain[1:] or domain_lower.endswith(high_domain)
+        ):
             return 0.85
 
-    for low_domain in LOW_AUTHORITY_DOMAINS:
+    ordered_low_domains = sorted(LOW_AUTHORITY_DOMAINS, key=lambda item: -len(item))
+    for low_domain in ordered_low_domains:
         if domain_lower == low_domain:
             return 0.1
         if low_domain in domain_lower:
@@ -72,6 +98,28 @@ def _get_domain_authority(domain: str) -> float:
 
     # 中性评估
     return 0.5
+
+
+def _normalize_domain_value(value: str) -> str:
+    """Normalize a domain field that may contain URLs or explanatory text."""
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+
+    if "://" in raw:
+        extracted = _extract_domain_from_url(raw)
+        if extracted:
+            return extracted
+
+    # Accept values like "gov.cn 为中国政府官方域名" or "www.people.com.cn".
+    match = re.search(r"([a-z0-9-]+(?:\.[a-z0-9-]+)+)", raw)
+    if not match:
+        return raw.strip(".")
+
+    domain = match.group(1).strip(".")
+    if domain.startswith("www."):
+        domain = domain[4:]
+    return domain
 
 
 def _clamp_score(value: object, default: float = 0.5) -> float:

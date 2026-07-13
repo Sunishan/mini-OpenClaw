@@ -23,6 +23,112 @@ _VERDICT_LABEL_MAP = {
     "unsupported": "中",
     "unverifiable": "中",
 }
+_REQUIRED_SIGNAL_KEYS = {
+    "claim_verification": "主张验证（含证据权威性）",
+    "domain_authority": "原网页域名权威性",
+    "source_transparency": "来源透明度",
+    "content_quality": "内容质量",
+}
+
+
+def _build_score_breakdown(signals: dict) -> list[dict]:
+    """Build user-facing score details from scorer signals."""
+    rows = []
+    for key, display_name in _REQUIRED_SIGNAL_KEYS.items():
+        signal = signals.get(key, {})
+        rows.append({
+            "维度": display_name,
+            "权重": f"{float(signal.get('weight', 0.0)) * 100:.0f}%",
+            "得分": round(float(signal.get("score", 0.0)), 4),
+            "说明": str(signal.get("details", ""))[:200],
+        })
+    return rows
+
+
+def _evidence_links(verdict: dict, relation: str | None = None) -> list[dict]:
+    """Extract clickable evidence links from a verdict."""
+    links: list[dict] = []
+    seen: set[str] = set()
+    sources = verdict.get("evidence_sources", [])
+    if not isinstance(sources, list):
+        return links
+
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        url = str(source.get("url", "")).strip()
+        if not url or url in seen:
+            continue
+
+        source_relation = str(source.get("relation", "")).lower()
+        supports_claim = source.get("supports_claim")
+        if relation == "support" and not (
+            supports_claim is True or source_relation in {"support", "supports", "supported"}
+        ):
+            continue
+        if relation == "contradict" and not (
+            supports_claim is False or source_relation in {"contradict", "contradicts", "contradicted", "refute", "refutes", "refuted"}
+        ):
+            continue
+
+        seen.add(url)
+        links.append({
+            "标题": str(source.get("title", ""))[:120],
+            "链接": url,
+            "域名": str(source.get("domain", "")),
+            "来源类型": str(source.get("source_type", "")),
+            "关系": source_relation or ("support" if supports_claim is True else ("contradict" if supports_claim is False else "")),
+        })
+    return links
+
+
+def _collect_evidence_links(verdicts: list[dict], limit: int = 8) -> list[dict]:
+    collected: list[dict] = []
+    seen: set[str] = set()
+    for verdict in verdicts:
+        preferred = _evidence_links(verdict, relation="support")
+        fallback = _evidence_links(verdict)
+        for link in preferred + fallback:
+            url = link.get("链接", "")
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            collected.append(link)
+            if len(collected) >= limit:
+                return collected
+    return collected
+
+
+def _validate_score_breakdown(credibility_result: dict) -> dict | None:
+    """Return a structured error if scorer signals are missing or incomplete."""
+    signals = credibility_result.get("signals")
+    if not isinstance(signals, dict):
+        return {
+            "error": "missing_score_breakdown",
+            "tool": "report_generator",
+            "hint": "credibility_result 必须包含 credibility_scorer 返回的 signals 小分明细，不能只传 overall_score。",
+        }
+
+    missing: list[str] = []
+    incomplete: list[str] = []
+    for key in _REQUIRED_SIGNAL_KEYS:
+        signal = signals.get(key)
+        if not isinstance(signal, dict):
+            missing.append(key)
+            continue
+        for field in ("weight", "score", "details"):
+            if field not in signal:
+                incomplete.append(f"{key}.{field}")
+
+    if missing or incomplete:
+        return {
+            "error": "incomplete_score_breakdown",
+            "tool": "report_generator",
+            "missing_signals": missing,
+            "incomplete_fields": incomplete,
+            "hint": "请直接传入 credibility_scorer 的完整返回结果，其中必须包含每个评分维度的 weight、score 和 details。",
+        }
+    return None
 
 
 def _build_skill_json(
@@ -50,6 +156,7 @@ def _build_skill_json(
         ctext = v.get("claim_text", "")
         status = v.get("status", "unsupported")
         ev_summary = v.get("evidence_summary", "")
+        links = _evidence_links(v, relation="support") or _evidence_links(v)
 
         # 被反驳的主张进入可疑点，不进入有效信息
         if status == "contradicted":
@@ -67,6 +174,7 @@ def _build_skill_json(
             "内容": ctext[:200],
             "可信度": cred,
             "理由": reason[:200],
+            "佐证链接": links[:3],
         })
 
     # ── 可疑点 ──────────────────────────────────────────
@@ -114,6 +222,8 @@ def _build_skill_json(
     # ── 组装最终 JSON ───────────────────────────────────
     result = {
         "事件": event_title[:100],
+        "评分明细": _build_score_breakdown(signals),
+        "主要佐证": _collect_evidence_links(verdicts),
         "有效信息": valid_items,
         "剔除信息": [],  # 由模型在最终整合时补充
         "可疑点": suspicious,
@@ -260,6 +370,15 @@ def _generate_markdown_report(
         lines.append(f"- **判定状态**：{status_display}（置信度：{confidence*100:.0f}%）")
         lines.append(f"- **支持证据**：{support_cnt} 条 | **反驳证据**：{contradict_cnt} 条")
         lines.append(f"- **分析说明**：{ev_summary[:300]}")
+        links = _evidence_links(v)
+        if links:
+            lines.append("- **证据链接**：")
+            for link in links[:5]:
+                title = link.get("标题") or link.get("域名") or link.get("链接")
+                url = link.get("链接", "")
+                relation = link.get("关系", "")
+                suffix = f"（{relation}）" if relation else ""
+                lines.append(f"  - [{title}]({url}){suffix}")
         lines.append("")
 
     # ── 建议 ────────────────────────────────────────────
@@ -347,6 +466,46 @@ def _report_generator(
             },
         }, ensure_ascii=False, indent=2)
 
+    score_breakdown_error = _validate_score_breakdown(credibility_result)
+    if score_breakdown_error is not None:
+        score_breakdown_error["example"] = {
+            "credibility_result": {
+                "overall_score": 0.72,
+                "score_label": "High Credibility",
+                "signals": {
+                    "claim_verification": {
+                        "weight": 0.50,
+                        "score": 0.86,
+                        "details": "主张验证分说明",
+                    },
+                    "domain_authority": {
+                        "weight": 0.20,
+                        "score": 0.90,
+                        "details": "域名权威性说明",
+                    },
+                    "source_transparency": {
+                        "weight": 0.15,
+                        "score": 0.92,
+                        "details": "来源透明度说明",
+                    },
+                    "content_quality": {
+                        "weight": 0.15,
+                        "score": 0.82,
+                        "details": "内容质量说明",
+                    },
+                },
+                "domain": "example.com",
+                "url": "https://example.com/news",
+                "verdict_summary": {
+                    "supported": 1,
+                    "contradicted": 0,
+                    "unsupported": 0,
+                    "unverifiable": 0,
+                },
+            }
+        }
+        return json.dumps(score_breakdown_error, ensure_ascii=False, indent=2)
+
     if output_format == "skill_json":
         return _build_skill_json(
             credibility_result=credibility_result,
@@ -385,7 +544,7 @@ report_generator_tool = Tool(
         "properties": {
             "credibility_result": {
                 "type": "object",
-                "description": "可信度评分结果（来自 credibility_scorer 输出）",
+                "description": "可信度评分结果，必须直接使用 credibility_scorer 的完整输出，包含 overall_score、score_label、signals 小分明细、verdict_summary",
             },
             "page_metadata": {
                 "type": "object",

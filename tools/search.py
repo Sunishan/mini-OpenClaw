@@ -12,21 +12,38 @@ from tools.base import Tool
 
 
 HIGH_AUTHORITY_DOMAINS: set[str] = {
-    ".gov", ".gov.cn", ".gov.uk", ".go.jp",
+    ".gov", ".gov.cn", ".gov.uk", ".gov.au", ".gov.sg", ".gov.in",
+    ".gov.br", ".gov.hk", ".gov.tw", ".go.jp", ".go.kr", ".gouv.fr",
+    ".gc.ca", ".govt.nz",
     ".edu", ".edu.cn", ".ac.uk", ".ac.cn",
     "gov.cn", "who.int", "un.org", "unicef.org", "worldbank.org",
-    "imf.org", "oecd.org", "iea.org",
+    "imf.org", "oecd.org", "iea.org", "bloomberg.org",
+    "wto.org", "ilo.org", "fao.org", "wmo.int", "ipcc.ch",
+    "iaea.org", "unesco.org", "nato.int", "europa.eu", "ec.europa.eu",
+    "canada.ca",
     "nasa.gov", "noaa.gov", "nih.gov", "cdc.gov", "nsf.gov",
+    "fda.gov", "clinicaltrials.gov", "ncbi.nlm.nih.gov",
+    "ema.europa.eu", "ecdc.europa.eu",
     "nhc.gov.cn", "samr.gov.cn", "mfa.gov.cn", "stats.gov.cn",
+    "mot.gov.cn", "mwr.gov.cn", "cma.gov.cn", "mem.gov.cn",
+    "mee.gov.cn", "moe.gov.cn",
+    "sec.gov", "federalreserve.gov", "treasury.gov", "ecb.europa.eu",
+    "bankofengland.co.uk", "bis.org", "pbc.gov.cn", "pboc.gov.cn",
+    "csrc.gov.cn", "nfsa.gov.cn", "safe.gov.cn",
     "stanford.edu", "mit.edu", "harvard.edu", "ox.ac.uk",
     "cam.ac.uk", "tsinghua.edu.cn", "pku.edu.cn",
 }
 
 AUTHORITATIVE_MEDIA_DOMAINS: set[str] = {
     "reuters.com", "ap.org", "apnews.com", "bbc.com", "bbc.co.uk",
-    "npr.org", "economist.com", "nature.com", "science.org",
+    "npr.org", "economist.com", "bloomberg.com", "ft.com", "wsj.com",
+    "nytimes.com", "washingtonpost.com", "theguardian.com",
+    "aljazeera.com", "dw.com", "france24.com", "nikkei.com",
+    "scmp.com", "nature.com", "science.org", "nejm.org",
+    "thelancet.com", "jamanetwork.com", "bmj.com",
     "nationalgeographic.com", "xinhuanet.com", "people.com.cn",
-    "cctv.com",
+    "news.cn", "cctv.com", "chinanews.com.cn", "chinadaily.com.cn",
+    "caixin.com", "thepaper.cn", "yicai.com",
 }
 
 LOW_AUTHORITY_DOMAINS: set[str] = {
@@ -58,7 +75,7 @@ def _domain_matches(domain: str, patterns: set[str]) -> str:
     for pattern in ordered_patterns:
         rule = pattern.lower()
         if rule.startswith("."):
-            if domain.endswith(rule):
+            if domain == rule[1:] or domain.endswith(rule):
                 return pattern
             continue
         if domain == rule or domain.endswith(f".{rule}"):

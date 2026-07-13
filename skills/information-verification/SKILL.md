@@ -325,6 +325,13 @@ report_generator(
 
 `report_generator` 输出的 JSON 就是最终答案的结构化格式。
 你在此基础上补充 `剔除信息` 字段（步骤 2 的剔除内容），并调整措辞。
+传入 `report_generator` 的 `credibility_result` 必须是 `credibility_scorer` 的完整返回结果，保留 `signals` 中每个维度的 `weight`、`score` 和 `details`。不能只传 `overall_score` 或总评标签。
+最终报告必须保留可打开的佐证 URL：
+
+- `主要佐证` 字段应列出用于判断的主要证据链接。
+- 每条 `有效信息` 应尽量保留对应 `佐证链接`。
+- 对真实新闻判定为可信时，必须优先展示至少两条独立佐证链接；可以是别家权威媒体、通讯社、官网或原始公告。
+- 不得编造 URL。没有链接时必须说明证据限制。
 
 最终回答门禁：
 
