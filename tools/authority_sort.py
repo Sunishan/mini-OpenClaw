@@ -48,8 +48,14 @@ AUTHORITATIVE_MEDIA_DOMAINS: set[str] = {
 }
 
 LOW_AUTHORITY_DOMAINS: set[str] = {
+    # ── 具体低信誉域名 ──
     "infowars.com", "breitbart.com", "beforeitsnews.com",
     "naturalnews.com", "zerohedge.com",
+    # ── 高风险 TLD（后缀匹配：所有以 .top/.xyz 等结尾的域名）──
+    ".top", ".xyz", ".info", ".cc", ".tk", ".ml", ".ga", ".cf",
+    ".gq", ".pw", ".click", ".download", ".loan", ".win", ".bid",
+    ".trade", ".date", ".review", ".country", ".stream", ".racing",
+    ".accountant", ".science", ".party", ".webcam", ".work",
 }
 
 

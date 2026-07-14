@@ -1,7 +1,7 @@
 """工具5：可信度评分工具。
 
 综合网页信号、来源信息和主张验证结果，输出可信度分数(0~1)和等级。
-使用四维度加权评分模型：主张验证60%、来源透明度20%、域名权威10%、内容质量10%。
+使用三维度加权评分模型：主张验证65%（含claim重要性权重）、域名权威20%、内容质量15%。
 """
 from __future__ import annotations
 import json
@@ -57,8 +57,14 @@ HIGH_AUTHORITY_DOMAINS: set[str] = {
 
 # 已知的低可信域名
 LOW_AUTHORITY_DOMAINS: set[str] = {
+    # ── 具体低信誉域名 ──
     "infowars.com", "breitbart.com", "beforeitsnews.com",
     "naturalnews.com", "zerohedge.com",
+    # ── 高风险 TLD（后缀匹配：所有以 .top/.xyz 等结尾的域名）──
+    ".top", ".xyz", ".info", ".cc", ".tk", ".ml", ".ga", ".cf",
+    ".gq", ".pw", ".click", ".download", ".loan", ".win", ".bid",
+    ".trade", ".date", ".review", ".country", ".stream", ".racing",
+    ".accountant", ".science", ".party", ".webcam", ".work",
 }
 
 
@@ -378,65 +384,6 @@ def _score_claim_verification(verdicts: list[dict]) -> tuple[float, str]:
     return overall, details
 
 
-def _score_transparency(meta: dict) -> float:
-    """评估来源透明度。
-
-    基于作者/来源、日期、描述/标题、内容长度四个指标。
-    """
-    score = 0.0
-    details = []
-
-    # 作者或明确来源（权重 0.35）
-    author = meta.get("author", "") or ""
-    source = (
-        meta.get("source", "")
-        or meta.get("publisher", "")
-        or meta.get("site_name", "")
-        or ""
-    )
-    if author.strip():
-        score += 1.0 * 0.35
-        details.append(f"作者已找到：{author[:30]}")
-    elif source.strip():
-        score += 1.0 * 0.35
-        details.append(f"来源已标注：{source[:30]}")
-    else:
-        details.append("作者或来源未标注")
-
-    # 发布日期（权重 0.30）
-    pub_date = meta.get("publication_date", "") or ""
-    if pub_date.strip():
-        score += 1.0 * 0.30
-        details.append(f"发布日期已标注：{pub_date}")
-    else:
-        details.append("发布日期未标注")
-
-    # 描述或标题（权重 0.20）
-    desc = meta.get("description", "") or ""
-    title = meta.get("title", "") or ""
-    if desc.strip() and len(desc) > 20:
-        score += 1.0 * 0.20
-        details.append("有详细页面描述")
-    elif title.strip() and len(title) > 8:
-        score += 1.0 * 0.20
-        details.append("有明确页面标题")
-    else:
-        details.append("页面描述和标题缺失或过短")
-
-    # 内容长度（权重 0.15）
-    word_count = meta.get("word_count", 0) or 0
-    text_content = meta.get("text_content", "") or ""
-    cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", text_content))
-    if word_count > 500 or cjk_chars > 800:
-        score += 1.0 * 0.15
-        details.append(f"内容丰富（{word_count} 词，{cjk_chars} 个中文字符）")
-    elif word_count > 100 or cjk_chars > 200:
-        score += 0.5 * 0.15
-        details.append(f"内容适中（{word_count} 词，{cjk_chars} 个中文字符）")
-    else:
-        details.append(f"内容简短（{word_count} 词，{cjk_chars} 个中文字符）")
-
-    return round(score, 2)
 
 
 def _count_pattern_terms(text: str, patterns: list[str]) -> int:
@@ -647,7 +594,7 @@ def _credibility_scorer(
             },
         })
 
-    # 信号 1：主张验证（权重 60%，内部已按证据相关性和证据来源权威性加权）
+    # 信号 1：主张验证（权重 65%，内部已按证据相关性、证据来源权威性加权，并按 claim 重要性权重综合）
     cv_score, cv_details = _score_claim_verification(verdicts)
     n_claims = len(verdicts)
     n_supported = sum(1 for v in verdicts if v.get("status") == "supported")
@@ -655,7 +602,7 @@ def _credibility_scorer(
     n_unsupported = sum(1 for v in verdicts if v.get("status") == "unsupported")
     n_unverifiable = sum(1 for v in verdicts if v.get("status") == "unverifiable")
     cv_signal = SignalScore(
-        weight=0.60,
+        weight=0.65,
         score=cv_score,
         details=(
             f"共 {n_claims} 条主张：{n_supported} 条支持, "
@@ -673,15 +620,7 @@ def _credibility_scorer(
         details=f"域名 {domain} 的权威性评分：{da_score:.2f}",
     )
 
-    # 信号 3：来源透明度（权重 10%）
-    st_score = _score_transparency(page_metadata)
-    st_signal = SignalScore(
-        weight=0.10,
-        score=st_score,
-        details=f"来源透明度评分：{st_score:.2f}",
-    )
-
-    # 信号 4：内容质量（权重 10%）
+    # 信号 3：内容质量（权重 15%）
     assessed_content_quality = _score_content_quality_from_assessment(
         page_metadata.get("content_quality_assessment")
     )
@@ -690,16 +629,15 @@ def _credibility_scorer(
     else:
         cq_score, cq_details = _score_content_quality(page_metadata)
     cq_signal = SignalScore(
-        weight=0.10,
+        weight=0.15,
         score=cq_score,
         details=cq_details,
     )
 
-    # 综合计算
+    # 综合计算（三维度加权）
     overall = (
         cv_signal.score * cv_signal.weight
         + da_signal.score * da_signal.weight
-        + st_signal.score * st_signal.weight
         + cq_signal.score * cq_signal.weight
     )
     overall = round(overall, 4)
@@ -726,7 +664,6 @@ def _credibility_scorer(
         signals={
             "claim_verification": cv_signal,
             "domain_authority": da_signal,
-            "source_transparency": st_signal,
             "content_quality": cq_signal,
         },
         domain=domain,
@@ -741,8 +678,9 @@ def _credibility_scorer(
 credibility_scorer_tool = Tool(
     name="credibility_scorer",
     description=(
-        "综合网页的多个信号（主张验证结果、原网页域名权威性、来源透明度、内容质量）。"
-        "主张验证结果内部会按证据相关性、证据来源权威性和支持/反驳关系置信度加权。"
+        "综合网页的多个信号（主张验证结果含claim重要性权重、原网页域名权威性、内容质量）。"
+        "三维度加权：主张验证65%、域名权威20%、内容质量15%。"
+        "主张验证结果内部会按证据相关性、证据来源权威性和支持/反驳关系置信度加权，并按claim重要性权重综合。"
         "计算可信度分数（0~1）和等级标签（High/Medium/Low Credibility）。"
         "返回 JSON 格式，包含每项信号的权重和得分详情。"
     ),

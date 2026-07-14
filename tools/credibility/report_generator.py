@@ -24,9 +24,8 @@ _VERDICT_LABEL_MAP = {
     "unverifiable": "中",
 }
 _REQUIRED_SIGNAL_KEYS = {
-    "claim_verification": "主张验证（含证据权威性）",
+    "claim_verification": "主张验证（含证据权威性与claim权重）",
     "domain_authority": "原网页域名权威性",
-    "source_transparency": "来源透明度",
     "content_quality": "内容质量",
 }
 
@@ -190,17 +189,6 @@ def _build_skill_json(
     if da_signal.get("score", 0.5) < 0.4:
         suspicious.append(f"来源域名 {domain} 权威性不足")
 
-    # 来源透明度低
-    st_signal = signals.get("source_transparency", {})
-    if st_signal.get("score", 0.5) < 0.3:
-        missing_parts = []
-        if not (page_metadata.get("author") or page_metadata.get("source") or page_metadata.get("publisher")):
-            missing_parts.append("作者或来源")
-        if not page_metadata.get("publication_date"):
-            missing_parts.append("发布日期")
-        if missing_parts:
-            suspicious.append(f"页面缺乏{', '.join(missing_parts)}等关键元信息")
-
     # ── 事件可信度 ──────────────────────────────────────
     cn_cred = _CREDIBILITY_LABEL_MAP.get(label, "中")
 
@@ -318,9 +306,8 @@ def _generate_markdown_report(
     lines.append("|----------|------|------|------|")
 
     signal_names = {
-        "claim_verification": "主张验证（含证据权威性）",
+        "claim_verification": "主张验证（含证据权威性与claim权重）",
         "domain_authority": "原网页域名权威性",
-        "source_transparency": "来源透明度",
         "content_quality": "内容质量",
     }
     for key, display_name in signal_names.items():
@@ -482,11 +469,6 @@ def _report_generator(
                         "weight": 0.20,
                         "score": 0.90,
                         "details": "域名权威性说明",
-                    },
-                    "source_transparency": {
-                        "weight": 0.15,
-                        "score": 0.92,
-                        "details": "来源透明度说明",
                     },
                     "content_quality": {
                         "weight": 0.15,
