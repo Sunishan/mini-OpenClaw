@@ -237,6 +237,8 @@ mcp__firecrawl_search(
 ]
 ```
 
+**重要**：`relevance_score` 和 `relation_confidence` 必须根据实际证据质量明确赋值（0.60~0.95），不要留空依赖默认值。未填写时 scorer 会使用较低的保守默认值（0.60），导致验证分偏低。同理，`supports_claim` 或 `relation` 必须填写，不可省略。
+
 如果某条主张没有可用证据来源，`evidence_sources` 设为空数组，并在 `evidence_summary` 中说明搜索限制或证据缺口。
 
 ### 步骤 4.5：内容质量结构化评估

@@ -55,6 +55,25 @@ HIGH_AUTHORITY_DOMAINS: set[str] = {
     "cam.ac.uk", "tsinghua.edu.cn", "pku.edu.cn",
 }
 
+# 顶级权威域名（政府/国际组织）— 得分 0.95
+PREMIUM_AUTHORITY_DOMAINS: set[str] = {
+    # 政府 TLD
+    ".gov", ".gov.cn", ".gov.uk", ".gov.au", ".gov.sg", ".gov.in",
+    ".gov.br", ".gov.hk", ".gov.tw", ".go.jp", ".go.kr", ".gouv.fr",
+    ".gc.ca", ".govt.nz",
+    # 国际组织
+    "who.int", "un.org", "unicef.org", "worldbank.org", "imf.org",
+    "oecd.org", "iea.org", "wto.org", "ilo.org", "fao.org",
+    "wmo.int", "ipcc.ch", "iaea.org", "unesco.org", "nato.int",
+    "europa.eu", "ec.europa.eu", "bis.org",
+}
+
+# 顶级权威媒体 — 得分 0.92
+TOP_MEDIA_DOMAINS: set[str] = {
+    "reuters.com", "ap.org", "apnews.com", "bbc.com", "bbc.co.uk",
+    "xinhuanet.com", "news.cn",
+}
+
 # 已知的低可信域名
 LOW_AUTHORITY_DOMAINS: set[str] = {
     # ── 具体低信誉域名 ──
@@ -71,7 +90,7 @@ LOW_AUTHORITY_DOMAINS: set[str] = {
 def _get_domain_authority(domain: str) -> float:
     """根据域名评估来源权威性。
 
-    返回 0.0 ~ 1.0 的分数。
+    返回 0.0 ~ 1.0 的分数。分层：顶级权威 0.95 > 顶级媒体 0.92 > 权威媒体 0.90 > 教育 0.88 > 普通 0.50 > 低信誉 0.10。
     """
     if not domain:
         return 0.3  # 无域名信息
@@ -80,30 +99,44 @@ def _get_domain_authority(domain: str) -> float:
     if not domain_lower:
         return 0.3
 
-    # 精确匹配与子域名匹配
-    ordered_high_domains = sorted(
-        HIGH_AUTHORITY_DOMAINS,
-        key=lambda item: (item.startswith("."), -len(item)),
-    )
-    for high_domain in ordered_high_domains:
-        if domain_lower == high_domain:
-            return 0.9
-        if not high_domain.startswith(".") and domain_lower.endswith(f".{high_domain}"):
-            return 0.9
-        if high_domain.startswith(".") and (
-            domain_lower == high_domain[1:] or domain_lower.endswith(high_domain)
-        ):
-            return 0.85
+    # 1) 顶级权威（政府/国际组织）→ 0.95
+    for premium in _iter_domain_matches(domain_lower, PREMIUM_AUTHORITY_DOMAINS):
+        return 0.95
 
-    ordered_low_domains = sorted(LOW_AUTHORITY_DOMAINS, key=lambda item: -len(item))
-    for low_domain in ordered_low_domains:
-        if domain_lower == low_domain:
-            return 0.1
-        if low_domain in domain_lower:
-            return 0.1
+    # 2) 顶级媒体 → 0.92
+    for top_media in _iter_domain_matches(domain_lower, TOP_MEDIA_DOMAINS):
+        return 0.92
+
+    # 3) 教育域名 → 0.88
+    edu_domains = {d for d in HIGH_AUTHORITY_DOMAINS if d.startswith(".edu") or d.startswith(".ac.")}
+    for edu in _iter_domain_matches(domain_lower, edu_domains):
+        return 0.88
+
+    # 4) 普通高权威域名 → 0.90
+    other_high = HIGH_AUTHORITY_DOMAINS - PREMIUM_AUTHORITY_DOMAINS - TOP_MEDIA_DOMAINS - edu_domains
+    for high_domain in _iter_domain_matches(domain_lower, other_high):
+        return 0.90
+
+    # 5) 低信誉域名 → 0.10
+    for low_domain in _iter_domain_matches(domain_lower, LOW_AUTHORITY_DOMAINS):
+        return 0.10
 
     # 中性评估
-    return 0.5
+    return 0.50
+
+
+def _iter_domain_matches(domain_lower: str, candidates: set[str]):
+    """Yield candidate domains that match the given domain."""
+    ordered = sorted(candidates, key=lambda item: (item.startswith("."), -len(item)))
+    for candidate in ordered:
+        if domain_lower == candidate:
+            yield candidate
+        elif not candidate.startswith(".") and domain_lower.endswith(f".{candidate}"):
+            yield candidate
+        elif candidate.startswith(".") and (
+            domain_lower == candidate[1:] or domain_lower.endswith(candidate)
+        ):
+            yield candidate
 
 
 def _normalize_domain_value(value: str) -> str:
@@ -218,14 +251,14 @@ def _score_evidence_source(source: dict) -> float:
 def _status_score(status: str) -> float:
     """Fallback score when no structured external evidence is available."""
     if status == "supported":
-        return 0.55
+        return 0.50
     if status == "contradicted":
-        return 0.25
+        return 0.20
     if status == "unsupported":
-        return 0.40
+        return 0.35
     if status == "unverifiable":
-        return 0.5
-    return 0.40
+        return 0.45
+    return 0.35
 
 
 def _claim_importance_weight(verdict: dict) -> float:
@@ -256,25 +289,48 @@ def _score_evidence_relevance(source: dict) -> float:
     missing relevance/similarity is treated as a warm default instead of 0.5.
     """
     if "relevance_score" in source:
-        return _clamp_score(source.get("relevance_score"), default=0.85)
+        return _clamp_score(source.get("relevance_score"), default=0.75)
     if "similarity_score" in source:
-        return _clamp_score(source.get("similarity_score"), default=0.85)
-    return 0.85
+        return _clamp_score(source.get("similarity_score"), default=0.75)
+    return 0.75
 
 
 def _score_relation_confidence(source: dict) -> float:
     if "relation_confidence" in source:
-        return _clamp_score(source.get("relation_confidence"), default=0.85)
+        return _clamp_score(source.get("relation_confidence"), default=0.75)
     if "confidence" in source:
-        return _clamp_score(source.get("confidence"), default=0.85)
-    return 0.85
+        return _clamp_score(source.get("confidence"), default=0.75)
+    return 0.75
 
 
-def _top_strength(scores: list[float]) -> float:
+def _top_strength(scores: list[float], gamma: float = 0.6) -> float:
+    """Rank-weighted top-3 aggregation.
+
+    Uses exponential rank decay so that adding weaker sources never
+    dilutes the strongest source (monotonic).  gamma=0.6 means:
+      top source weight 1.0, 2nd 0.6, 3rd 0.36.
+    """
     if not scores:
         return 0.0
-    top_scores = sorted(scores, reverse=True)[:3]
-    return sum(top_scores) / len(top_scores)
+    top = sorted(scores, reverse=True)[:3]
+    if len(top) == 1:
+        return top[0]
+    weights = [gamma ** i for i in range(len(top))]
+    total = sum(weights)
+    return sum(w * s for w, s in zip(weights, top)) / total
+
+
+def _source_diversity_bonus(n_support_sources: int, n_unique_domains: int) -> float:
+    """Logarithmic bonus for corroboration by multiple independent sources.
+
+    Returns a multiplier >= 1.0, capped at 1.15.
+    """
+    if n_support_sources <= 1 or n_unique_domains <= 1:
+        return 1.0
+    import math
+    effective = min(n_unique_domains, 6)
+    bonus = 1.0 + 0.08 * math.log2(effective)
+    return min(bonus, 1.15)
 
 
 def _score_verdict_with_evidence(verdict: dict) -> tuple[float, bool, int, int, int]:
@@ -286,6 +342,7 @@ def _score_verdict_with_evidence(verdict: dict) -> tuple[float, bool, int, int, 
 
     support_scores: list[float] = []
     contradict_scores: list[float] = []
+    support_domains: set[str] = set()
     high_sources = 0
     low_sources = 0
 
@@ -304,6 +361,9 @@ def _score_verdict_with_evidence(verdict: dict) -> tuple[float, bool, int, int, 
         relation = _evidence_relation(source, status)
         if relation == "support":
             support_scores.append(strength)
+            domain = str(source.get("domain") or "").strip().lower()
+            if domain:
+                support_domains.add(domain)
         elif relation == "contradict":
             contradict_scores.append(strength)
 
@@ -312,7 +372,14 @@ def _score_verdict_with_evidence(verdict: dict) -> tuple[float, bool, int, int, 
 
     support_strength = _top_strength(support_scores)
     contradict_strength = _top_strength(contradict_scores)
-    score = 0.5 + 0.5 * (support_strength - contradict_strength)
+
+    # Corroboration bonus: multiple independent supporting sources
+    if support_scores:
+        support_strength *= _source_diversity_bonus(
+            len(support_scores), len(support_domains)
+        )
+
+    score = 0.45 + 0.5 * (support_strength - contradict_strength)
     return (
         round(max(0.0, min(score, 1.0)), 4),
         True,
@@ -322,27 +389,41 @@ def _score_verdict_with_evidence(verdict: dict) -> tuple[float, bool, int, int, 
     )
 
 
-def _has_strong_core_contradiction(verdict: dict) -> bool:
-    if not _is_core_claim(verdict):
-        return False
-    if verdict.get("status") != "contradicted":
-        return False
+def _core_contradiction_severity(verdicts: list[dict]) -> float:
+    """Return a severity score 0.0-1.0 for how badly core claims are contradicted.
 
-    for source in _iter_evidence_sources(verdict):
-        if _evidence_relation(source, "contradicted") != "contradict":
+    Accounts for: (a) how many core claims are contradicted, (b) how strong
+    the contradicting evidence is per claim.  Returns 0.0 when no core claims
+    are contradicted or there are no core claims at all.
+    """
+    core_verdicts = [v for v in verdicts if _is_core_claim(v)]
+    if not core_verdicts:
+        return 0.0
+
+    total_severity = 0.0
+    for verdict in core_verdicts:
+        if verdict.get("status") != "contradicted":
             continue
-        authority = _score_evidence_source(source)
-        relevance = _score_evidence_relevance(source)
-        confidence = _score_relation_confidence(source)
-        if authority >= 0.85 and relevance * confidence >= 0.60:
-            return True
-    return False
+        # Find the strongest contradicting source for this core claim
+        max_contradiction = 0.0
+        for source in _iter_evidence_sources(verdict):
+            if _evidence_relation(source, "contradicted") != "contradict":
+                continue
+            authority = _score_evidence_source(source)
+            relevance = _score_evidence_relevance(source)
+            confidence = _score_relation_confidence(source)
+            strength = authority * relevance * confidence
+            if strength > max_contradiction:
+                max_contradiction = strength
+        total_severity += max_contradiction
+
+    return total_severity / len(core_verdicts)
 
 
 def _score_claim_verification(verdicts: list[dict]) -> tuple[float, str]:
     """评估主张验证维度的分数，把证据相关性和权威性计入验证强度。"""
     if not verdicts:
-        return 0.5, "无主张验证结果，主张验证取中性分"
+        return 0.45, "无主张验证结果，主张验证取中性分"
 
     weighted_total = 0.0
     weight_total = 0.0
@@ -350,7 +431,6 @@ def _score_claim_verification(verdicts: list[dict]) -> tuple[float, str]:
     total_sources = 0
     high_sources = 0
     low_sources = 0
-    strong_core_contradiction = False
 
     for verdict in verdicts:
         score, used_structured, source_count, high_count, low_count = _score_verdict_with_evidence(verdict)
@@ -362,15 +442,18 @@ def _score_claim_verification(verdicts: list[dict]) -> tuple[float, str]:
         total_sources += source_count
         high_sources += high_count
         low_sources += low_count
-        strong_core_contradiction = (
-            strong_core_contradiction
-            or _has_strong_core_contradiction(verdict)
-        )
 
     overall = round(weighted_total / max(weight_total, 0.0001), 4)
-    cap_applied = strong_core_contradiction and overall > 0.40
-    if cap_applied:
-        overall = 0.40
+
+    # Progressive cap based on core-contradiction severity
+    contradiction_severity = _core_contradiction_severity(verdicts)
+    cap_applied = False
+    if contradiction_severity > 0 and overall > 0.25:
+        # Cap = 0.60 - severity * 0.50, clamped to [0.25, 0.60]
+        cap = max(0.25, min(0.60, 0.60 - 0.50 * contradiction_severity))
+        if overall > cap:
+            cap_applied = True
+            overall = round(cap, 4)
 
     details = (
         "主张验证分已按 claim 重要性、证据相关性、证据来源权威性和支持/反驳关系置信度加权；"
@@ -380,7 +463,10 @@ def _score_claim_verification(verdicts: list[dict]) -> tuple[float, str]:
     if structured_verdicts < len(verdicts):
         details += "；缺少结构化证据的主张使用旧版 status 规则兜底"
     if cap_applied:
-        details += "；检测到核心主张被高权威证据反驳，主张验证分已封顶为 0.40"
+        details += (
+            f"；检测到核心主张被反驳（严重度 {contradiction_severity:.2f}），"
+            f"主张验证分已封顶为 {overall:.2f}"
+        )
     return overall, details
 
 
@@ -439,7 +525,7 @@ def _score_content_quality(meta: dict) -> tuple[float, str]:
 
     cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
     total_chars = max(len(text), cjk_chars, 1)
-    score = 1.0
+    score = 0.70  # Regex fallback starts conservative, not assuming perfection
     details: list[str] = []
 
     contradiction_pairs = [
@@ -495,7 +581,8 @@ def _score_content_quality(meta: dict) -> tuple[float, str]:
 
     final_score = round(max(0.0, min(score, 1.0)), 2)
     if not details:
-        details.append("未发现明显内部矛盾、逻辑冲突或高密度模糊表述")
+        details.append("正则兜底评估，未发现明显内部矛盾、逻辑冲突或高密度模糊表述")
+    details.insert(0, "使用正则规则兜底评估（建议提供 content_quality_assessment）")
     return final_score, "；".join(details)
 
 
