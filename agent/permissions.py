@@ -168,9 +168,6 @@ def check_with_reason(
     if tool in EXEC:
         return "confirm", "执行命令需要确认"
 
-    if tool in LOW_RISK_NETWORK:
-        return "allow", "低风险检索工具"
-
     # Unknown tools are treated conservatively.
     return "confirm", "未知工具需要确认"
 

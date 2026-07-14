@@ -14,9 +14,11 @@
 from __future__ import annotations
 
 import json
+import re
 import signal
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from agent.context import maybe_compact, truncate_observation
 from agent import permissions
@@ -43,11 +45,99 @@ except ImportError:  # pragma: no cover - only used before optional UI dependenc
 
 console = Console() if Console is not None else None
 HISTORY_FILE = Path.home() / ".mini-openclaw" / "history.json"
+T = TypeVar("T")
+
+
+_TRANSIENT_FAILURE_PATTERNS = (
+    r"timeout",
+    r"timed out",
+    r"请求超时",
+    r"temporarily unavailable",
+    r"network error",
+    r"网络错误",
+    r"请求失败",
+    r"connection reset",
+    r"connection aborted",
+    r"connection error",
+    r"rate limit",
+    r"\b429\b",
+    r"\b500\b",
+    r"\b502\b",
+    r"\b503\b",
+    r"\b504\b",
+    r"MCP server 响应超时",
+)
+_RECOVERABLE_FAILURE_PATTERNS = (
+    r"missing_required_arguments",
+    r"invalid_arguments",
+    r"未找到待替换文本",
+    r"不唯一",
+    r"文件不存在",
+    r"No such file",
+    r"未找到 rg",
+    r"unknown option",
+    r"JSONDecodeError",
+    r"\[失败\]",
+    r"\[错误\]",
+    r"执行出错",
+    r"returncode=",
+)
+_PERMANENT_FAILURE_PATTERNS = (
+    r"\[权限层\] 拒绝",
+    r"\[权限层\] 用户拒绝",
+    r"\[权限层\] 需确认",
+    r"URL 不安全",
+    r"读取敏感路径",
+    r"拒绝写入工作目录外文件",
+    r"未知工具",
+    r"高危命令",
+)
 
 
 def _preview(value: object, limit: int) -> str:
     text = str(value)
     return text[:limit] + "..." if len(text) > limit else text
+
+
+def _matches_any(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _classify_failure_text(text: str) -> str | None:
+    """Return transient/recoverable/permanent when an observation looks failed."""
+    if not text:
+        return None
+    if _matches_any(text, _PERMANENT_FAILURE_PATTERNS):
+        return "permanent"
+    if _matches_any(text, _TRANSIENT_FAILURE_PATTERNS):
+        return "transient"
+    if _matches_any(text, _RECOVERABLE_FAILURE_PATTERNS):
+        return "recoverable"
+    return None
+
+
+def _is_transient_exception(exc: Exception) -> bool:
+    return _classify_failure_text(str(exc)) == "transient"
+
+
+def _call_with_retry(
+    fn: Callable[[], T],
+    *,
+    max_tries: int = 3,
+    base_delay: float = 0.5,
+) -> T:
+    """Retry transient exceptions with exponential backoff."""
+    last_exc: Exception | None = None
+    for attempt in range(max_tries):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if not _is_transient_exception(exc) or attempt == max_tries - 1:
+                raise
+            time.sleep(base_delay * (2 ** attempt))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _print_task(user_task: str) -> None:
@@ -117,10 +207,13 @@ def _print_warning(message: str) -> None:
 
 
 def _backend_chat(backend: Any, messages: list[dict[str, Any]], tools: list[dict]) -> dict[str, Any]:
+    def call() -> dict[str, Any]:
+        return backend.chat(messages, tools=tools)
+
     if console is not None:
         with console.status("[bold yellow]思考中...[/bold yellow]", spinner="dots"):
-            return backend.chat(messages, tools=tools)
-    return backend.chat(messages, tools=tools)
+            return _call_with_retry(call)
+    return _call_with_retry(call)
 
 
 def _load_history() -> list[dict[str, Any]]:
@@ -147,6 +240,8 @@ def _save_history(messages: list[dict[str, Any]]) -> None:
         HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         condensed = []
         for m in messages:
+            if m.get("transient"):
+                continue
             if m.get("role") not in ("system", "user", "assistant"):
                 continue
             if m.get("role") == "assistant" and m.get("tool_calls"):
@@ -179,6 +274,10 @@ class AgentLoop:
         self._trusted_domains: set[str] = set()    # 交互式确认中信任的域名
         self._user_allowed_urls: set[str] = set()  # 用户显式提供且通过安全检查的 URL
         self._paused = False                       # Ctrl+Z 暂停标志
+        self._failure_counts: dict[str, int] = {}
+        self._reflection_counts: dict[str, int] = {}
+        self._max_failures_per_key = 3
+        self._max_reflections_per_key = 2
         self._setup_signal_handler()
 
     def _setup_signal_handler(self) -> None:
@@ -266,10 +365,115 @@ class AgentLoop:
         self._history_loaded = False
         self._trusted_domains.clear()
         self._user_allowed_urls.clear()
+        self._failure_counts.clear()
+        self._reflection_counts.clear()
         try:
             HISTORY_FILE.unlink(missing_ok=True)
         except Exception:
             pass
+
+    def _failure_key(self, name: str, args: dict) -> str:
+        if "path" in args:
+            return f"{name}:path:{args.get('path')}"
+        if "url" in args:
+            return f"{name}:url:{args.get('url')}"
+        if "command" in args:
+            return f"{name}:command:{args.get('command')}"
+        return name
+
+    def _clear_failure(self, key: str) -> None:
+        self._failure_counts.pop(key, None)
+
+    def _annotate_failed_observation(self, name: str, args: dict, obs: str) -> str:
+        failure_kind = _classify_failure_text(obs)
+        key = self._failure_key(name, args)
+        if failure_kind is None:
+            self._clear_failure(key)
+            return obs
+
+        count = self._failure_counts.get(key, 0) + 1
+        self._failure_counts[key] = count
+
+        if count >= self._max_failures_per_key:
+            return (
+                f"{obs}\n\n"
+                f"[错误恢复] 同一操作已连续失败 {count} 次，标记为 blocked：{key}。\n"
+                "请不要继续重复同一工具调用；应换一种方法、缩小目标，或向用户说明当前限制。"
+            )
+
+        if failure_kind == "permanent":
+            return (
+                f"{obs}\n\n"
+                "[错误恢复] 该失败看起来是权限、安全策略或工具不存在导致的永久失败。"
+                "不要重复同一操作；请重规划。"
+            )
+        if failure_kind == "transient":
+            return (
+                f"{obs}\n\n"
+                f"[错误恢复] {name} 疑似瞬时失败，已重试但仍失败。"
+                "下一步应换一种路径或降低目标。"
+            )
+        return (
+            f"{obs}\n\n"
+            "[错误恢复] 该失败可能可修复。请检查参数、路径、输入格式或前置步骤，"
+            "下一步只做一个最小修正动作。"
+        )
+
+    def _run_tool_with_recovery(self, name: str, args: dict) -> str:
+        tool = self.registry.get(name)
+        if tool is None:
+            return self._annotate_failed_observation(name, args, f"错误：未知工具 {name}")
+
+        key = self._failure_key(name, args)
+
+        def run_once() -> str:
+            try:
+                return str(tool.run(**args))
+            except Exception as e:  # noqa: BLE001
+                return f"工具 {name} 执行出错：{e}"
+
+        obs = run_once()
+        failure_kind = _classify_failure_text(obs)
+        if failure_kind is None:
+            self._clear_failure(key)
+            return obs
+
+        if failure_kind == "transient":
+            for attempt in range(2):
+                time.sleep(0.5 * (2 ** attempt))
+                retry_obs = run_once()
+                if _classify_failure_text(retry_obs) is None:
+                    self._clear_failure(key)
+                    return (
+                        f"{retry_obs}\n\n"
+                        f"[错误恢复] {name} 之前疑似瞬时失败，重试后成功。"
+                    )
+
+        return self._annotate_failed_observation(name, args, obs)
+
+    def _build_reflection_prompt(self, name: str, args: dict, obs: str) -> dict[str, Any] | None:
+        if _classify_failure_text(obs) is None:
+            return None
+
+        key = self._failure_key(name, args)
+        count = self._reflection_counts.get(key, 0)
+        if count >= self._max_reflections_per_key:
+            return None
+
+        self._reflection_counts[key] = count + 1
+        return {
+            "role": "system",
+            "transient": True,
+            "content": (
+                f"反思检查 {count + 1}/{self._max_reflections_per_key}："
+                f"刚才工具 {name} 返回失败或异常结果。"
+                "请先判断失败属于瞬时失败、参数错误、权限限制、信息不足还是永久失败。"
+                "如果能修正，下一步只做一个最小修正动作；"
+                "如果同一操作反复失败，不要继续重复，应换路径或说明限制。\n"
+                f"工具参数：{args}\n"
+                f"工具结果：{obs[:1000]}"
+            ),
+        }
 
     def _confirm_tool(self, name: str, args: dict) -> bool:
         """交互式确认：用户实时决定是否放行工具调用。
@@ -386,12 +590,15 @@ class AgentLoop:
                 return thought
 
             rows: list[tuple[str, str, str, str]] = []
+            reflection_messages: list[dict[str, Any]] = []
 
             # 分发并执行工具
             for i, call in enumerate(tool_calls):
                 call_id = call.get("id") or f"call_{i}"
                 name = call["name"]
                 args = call.get("arguments", {})
+                if not isinstance(args, dict):
+                    args = {}
                 args_str = ", ".join(f"{k}={_preview(v, 120)}" for k, v in args.items())
 
                 verdict, reason = permissions.check_with_reason(
@@ -415,14 +622,9 @@ class AgentLoop:
                         obs = f"[权限层] 需确认{detail}：{name}({args}) —— 已拦截（非交互模式，默认不放行）"
                         tool_blocked = True
                 if not tool_blocked:
-                    tool = self.registry.get(name)
-                    if tool is None:
-                        obs = f"错误：未知工具 {name}"
-                    else:
-                        try:
-                            obs = tool.run(**args)
-                        except Exception as e:  # noqa: BLE001
-                            obs = f"工具 {name} 执行出错：{e}"
+                    obs = self._run_tool_with_recovery(name, args)
+                else:
+                    obs = self._annotate_failed_observation(name, args, str(obs))
 
                 rows.append((str(i + 1), name, args_str, _preview(obs, 500)))
                 self.messages.append({
@@ -431,7 +633,11 @@ class AgentLoop:
                     "tool_call_id": call_id,
                     "content": truncate_observation(str(obs)),
                 })
+                reflection = self._build_reflection_prompt(name, args, str(obs))
+                if reflection is not None:
+                    reflection_messages.append(reflection)
 
+            self.messages.extend(reflection_messages)
             _print_tool_results(rows)
             self.messages = maybe_compact(self.messages, self.backend)
 

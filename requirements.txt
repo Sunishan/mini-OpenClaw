@@ -9,6 +9,9 @@ markdownify>=0.13    # web_fetch: HTML -> markdown
 # --- 网页可信度评估（credibility tools）---
 beautifulsoup4>=4.12 # 网页解析（webpage_reader 工具）
 
+# --- 测试 ---
+pytest>=8            # 运行 tests/ 下的单元测试
+
 # --- 搜索工具（web_search / kb_retriever）---
 ddgs>=9.14          # DuckDuckGo 搜索（免费，无需 API Key）
 
