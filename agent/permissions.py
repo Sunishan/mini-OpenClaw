@@ -51,8 +51,18 @@ def is_external_source(name: str) -> bool:
     """
     return name in EXTERNAL_SOURCES or name.startswith("mcp__")
 
-SENSITIVE_PARTS = {".ssh", ".env", ".git-credentials"}
-SENSITIVE_PATHS = {"/etc/shadow", "/etc/sudoers"}
+SENSITIVE_PARTS = {
+    ".ssh", ".env", ".git-credentials",
+    ".aws", ".gcloud", ".docker",     # 云凭据
+    ".gnupg", ".pki",                  # 加密密钥
+    "id_rsa", "id_ecdsa", "id_ed25519",  # SSH 私钥文件名
+}
+SENSITIVE_PATHS = {
+    "/etc/shadow", "/etc/sudoers", "/etc/passwd", "/etc/group",
+    "/etc/hosts", "/etc/resolv.conf", "/etc/fstab",
+    "/etc/ssh/ssh_host_rsa_key", "/etc/ssl/private",
+    "/proc/1/environ", "/proc/1/cmdline",
+}
 
 
 def _inside(path: Path, root: Path) -> bool:
